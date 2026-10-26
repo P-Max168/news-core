@@ -1,0 +1,182 @@
+{
+ "version": 1,
+ "stage": 2,
+ "source_of_truth": "core/tools (기준: thai-news-kr e78cc94 이후 main, 2026-10-26 세 사이트 md5 동일 29개)",
+ "files": [
+  {
+   "src": "core/tools/adsafe.py",
+   "dst": "tools/adsafe.py"
+  },
+  {
+   "src": "core/tools/build_data.py",
+   "dst": "tools/build_data.py"
+  },
+  {
+   "src": "core/tools/canon_guard.sh",
+   "dst": "tools/canon_guard.sh"
+  },
+  {
+   "src": "core/tools/collect.py",
+   "dst": "tools/collect.py"
+  },
+  {
+   "src": "core/tools/discussion.py",
+   "dst": "tools/discussion.py"
+  },
+  {
+   "src": "core/tools/edition_claim.py",
+   "dst": "tools/edition_claim.py"
+  },
+  {
+   "src": "core/tools/edition_stale.py",
+   "dst": "tools/edition_stale.py"
+  },
+  {
+   "src": "core/tools/edition_watch.py",
+   "dst": "tools/edition_watch.py"
+  },
+  {
+   "src": "core/tools/fetch_candidates.sh",
+   "dst": "tools/fetch_candidates.sh"
+  },
+  {
+   "src": "core/tools/fetch_korea.py",
+   "dst": "tools/fetch_korea.py"
+  },
+  {
+   "src": "core/tools/fetch_ticker.py",
+   "dst": "tools/fetch_ticker.py"
+  },
+  {
+   "src": "core/tools/fetch_trends.py",
+   "dst": "tools/fetch_trends.py"
+  },
+  {
+   "src": "core/tools/firebase_config.json",
+   "dst": "tools/firebase_config.json"
+  },
+  {
+   "src": "core/tools/gen_time_check.py",
+   "dst": "tools/gen_time_check.py"
+  },
+  {
+   "src": "core/tools/gnews.py",
+   "dst": "tools/gnews.py"
+  },
+  {
+   "src": "core/tools/gnews_keywords.json",
+   "dst": "tools/gnews_keywords.json"
+  },
+  {
+   "src": "core/tools/gnews_scan.py",
+   "dst": "tools/gnews_scan.py"
+  },
+  {
+   "src": "core/tools/lang_build.sh",
+   "dst": "tools/lang_build.sh"
+  },
+  {
+   "src": "core/tools/legal_pages.py",
+   "dst": "tools/legal_pages.py"
+  },
+  {
+   "src": "core/tools/make_icons.py",
+   "dst": "tools/make_icons.py"
+  },
+  {
+   "src": "core/tools/metrics.py",
+   "dst": "tools/metrics.py"
+  },
+  {
+   "src": "core/tools/pending.py",
+   "dst": "tools/pending.py"
+  },
+  {
+   "src": "core/tools/publisher_guard.py",
+   "dst": "tools/publisher_guard.py"
+  },
+  {
+   "src": "core/tools/screenshot.py",
+   "dst": "tools/screenshot.py"
+  },
+  {
+   "src": "core/tools/stamp_assets.py",
+   "dst": "tools/stamp_assets.py"
+  },
+  {
+   "src": "core/tools/strip_trend_cards.py",
+   "dst": "tools/strip_trend_cards.py"
+  },
+  {
+   "src": "core/tools/test_pwa.py",
+   "dst": "tools/test_pwa.py"
+  },
+  {
+   "src": "core/tools/trend_blocklist.txt",
+   "dst": "tools/trend_blocklist.txt"
+  },
+  {
+   "src": "core/tools/verify_live.py",
+   "dst": "tools/verify_live.py"
+  }
+ ],
+ "rollout_order": [
+  "vn",
+  "zh",
+  "kr"
+ ],
+ "sites": {
+  "vn": {
+   "repo": "P-Max168/vn-news-kr"
+  },
+  "zh": {
+   "repo": "P-Max168/thai-news-zh"
+  },
+  "kr": {
+   "repo": "P-Max168/thai-news-kr"
+  }
+ },
+ "html_build_cmds": [
+  "python3 tools/site_build.py --root ."
+ ],
+ "protected_patterns": {
+  "billing_cost": [
+   "budget",
+   "billing",
+   "cost",
+   "price_thb",
+   "BUDGET"
+  ],
+  "permissions_tokens": [
+   "token",
+   "secret",
+   "permissions:",
+   "firestore.rules",
+   "PAT",
+   "credentials"
+  ],
+  "seo_exposure": [
+   "robots.txt",
+   "sitemap",
+   "noindex",
+   "Disallow"
+  ],
+  "privacy": [
+   "privacy",
+   "personal",
+   "email",
+   "phone",
+   "firebase_config.json"
+  ]
+ },
+ "never_touch": [
+  "tools/deploy.sh (zh 82행 Claude 작업분)",
+  "robots.txt (vn, 맥스 결정 전)"
+ ],
+ "pricing": {
+  "usd_per_1m_input": 0.3,
+  "usd_per_1m_output": 2.5,
+  "thb_per_usd": 33.0,
+  "basis": "추정(공개 flash 단가 가정, 청구서로 보정 필요)"
+ }
+}

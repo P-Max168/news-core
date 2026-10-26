@@ -1,0 +1,21 @@
+{
+ "note": "tools/gnews_scan.py 검색어(Google News RSS 레이더 — 발견용, 사이트에 다시 게시하지 않음). ko = hl=ko·gl=TH, en = hl=en-US·gl=TH. 검색엔 when:1d 를 붙이고 hours 안쪽만 남김. require.<ko|en> = 그 언어 결과는 제목에 이 정규식이 있어야 남김(지금은 ko 만 — 한국 국내 기사 섞임 방지)(검색어엔 걸렸지만 태국 기사가 아닌 것 거르기). exclude = 제목·매체에 있으면 버림(도박 스팸 등).",
+ "hours": 18,
+ "ko": [
+  "태국 비자",
+  "파타야",
+  "방콕",
+  "스리라차",
+  "태국"
+ ],
+ "en": [
+  "Thailand visa",
+  "Pattaya",
+  "Bangkok",
+  "Thailand"
+ ],
+ "require": {
+  "ko": "태국|타이|방콕|파타야|스리라차|시라차|푸껫|푸켓|치앙마이|치앙라이|사무이|끄라비|후아힌|촌부리|라용|좀티엔|수완나품|돈므앙|Thai|Bangkok|Pattaya|Sri ?Racha|Phuket|Chiang|Samui|Krabi|Hua Hin|Chon ?Buri|Rayong|Jomtien|Suvarnabhumi|Don Mueang|Isaan|Hat Yai|Koh "
+ },
+ "exclude": "카지노|바카라|슬롯|토토|도박 사이트|casino|baccarat|slot ?game|betting|Calgary Roughnecks"
+}

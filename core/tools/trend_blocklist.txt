@@ -1,0 +1,70 @@
+# 성인·선정적(adult/sexual) 키워드 차단 목록 — tools/fetch_trends.py 와 tools/newslib.py(validate)가 읽음
+# - 한 줄에 하나. 대소문자 무시, '부분 문자열' 일치. '#'로 시작하면 주석.
+# - 're:' 로 시작하면 정규식(예: 태국어 짧은 단어가 정상 단어 안에 들어가는 경우 예외 처리).
+# - 트렌드: 일치하면 화면에 싣지 않고 버린다(필터 개수만 note 에 기록).
+# - 기사: 제목·원문 제목·태그·요약에 일치하면 build 가 멈춘다 → 선정적 기사는 빼고, 정말 필요한 일반 기사면 표현을 바꾼다.
+# 영어
+porn
+xxx
+nsfw
+18+
+onlyfans
+only fans
+fansly
+nude
+nudes
+naked
+sextape
+sex tape
+sexy
+hentai
+milf
+camgirl
+blowjob
+boobs
+pussy
+re:\bdick\b
+re:\bcock\b
+horny
+nudity
+leaked clip
+leakedvideo
+re:\bsex\b
+re:\bxxx\b
+re:\bavxxx|\bjav\b
+re:\bbdsm\b
+re:\bfetish
+# 태국어
+คลิปหลุด
+คลิปโป๊
+หนังโป๊
+หนังเอ็กซ์
+หนังxxx
+ภาพโป๊
+re:โป๊(?!ะ)
+เย็ด
+re:หี(?!บ)
+ควย
+จู๋
+เงี่ยน
+re:(?<!หวาด)เสียว
+อมกล้วย
+แตกใน
+ชักว่าว
+ช่วยตัวเอง
+ขายตัว
+ไซด์ไลน์
+ไซต์ไลน์
+sideline
+เด็กเอ็น
+ร่วมเพศ
+ข่มขืน
+อนาจาร
+นมใหญ่
+หลุดนม
+ลามก
+# 한국어
+야동
+섹스
+성인물
+음란
