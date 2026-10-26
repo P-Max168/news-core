@@ -1,0 +1,25 @@
+name: core-sync
+on:
+  push: { branches: [main], paths: ["core/**", "core.json"] }
+  workflow_dispatch:
+    inputs: { apply: { description: "PR 생성(3단계 이후만)", default: "false" } }
+permissions: { contents: read }
+concurrency: core-sync
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env: { GH_TOKEN: "${{ secrets.CORE_SYNC_TOKEN }}", CORE_STAGE_LOCK: "${{ vars.CORE_STAGE_LOCK }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      # 순서 vn → zh → kr. 앞 사이트 실패 시 중단(set -e). 판 발행 확인·되돌리기는 3단계에서 추가.
+      - run: |
+          set -e
+          for s in vn:vn-news-kr zh:thai-news-zh kr:thai-news-kr; do
+            k=${s%%:*}; r=${s#*:}
+            git clone -q --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/P-Max168/$r" "/tmp/$r"
+            A=""; [ "${{ inputs.apply }}" = "true" ] && A="--apply"
+            python sync.py --site "$k" --clone "/tmp/$r" $A
+          done

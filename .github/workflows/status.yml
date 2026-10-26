@@ -1,0 +1,15 @@
+name: status
+on:
+  workflow_dispatch:
+  # schedule: [{ cron: "15 * * * *" }]   # 3단계 이후 켬
+permissions: { contents: write }
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    env: { GH_TOKEN: "${{ secrets.CORE_SYNC_TOKEN }}", CORE_SYNC_TOKEN: "${{ secrets.CORE_SYNC_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 status_check.py -o status.json
+      - run: |
+          git config user.name news-core-bot; git config user.email 337087498+P-Max168@users.noreply.github.com
+          git add status.json; git commit -qm "status $(date -u +%FT%TZ)" || true; git push
