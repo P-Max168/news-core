@@ -39,10 +39,13 @@ def protected(changed_text):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--site", required=True); ap.add_argument("--clone", required=True)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--stage", type=int, default=M["stage"])
-    ap.add_argument("--pr-body", default=""); a = ap.parse_args()
-    clone = pathlib.Path(a.clone).resolve(); r = {"site": a.site, "dry_run": not a.apply}
+    ap.add_argument("--pr-body", default="")
+    ap.add_argument("--pull", action="store_true", help="당겨오기 모드(2026-10-29): 검사 통과 시 --clone 작업 폴더에 공통 파일을 직접 복사(커밋·PR은 호출한 워크플로가)")
+    a = ap.parse_args()
+    clone = pathlib.Path(a.clone).resolve(); r = {"site": a.site, "dry_run": not (a.apply or a.pull)}
     why = skip(a.site, clone)
     if why: r["skipped"] = why; print(json.dumps(r, ensure_ascii=False)); return
+    if a.pull: a.stage = max(a.stage, 3)   # 당겨오기는 코어가 사이트보다 앞선 상태가 정상 — 2단계 '0줄' 게이트는 안 씀
     with tempfile.TemporaryDirectory() as td:
         before, after = pathlib.Path(td, "before"), pathlib.Path(td, "after")
         shutil.copytree(clone, before, ignore=shutil.ignore_patterns(".git")); shutil.copytree(clone, after, ignore=shutil.ignore_patterns(".git"))
@@ -55,6 +58,9 @@ def main():
                 changed.append(f["dst"]); file_diff += list(difflib.unified_diff(old.splitlines(), new.splitlines(), f["dst"], f["dst"], lineterm=""))
                 shutil.copy2(s, d)
         r["files_changed"] = changed; r["file_diff_lines"] = len(file_diff)
+        # 워크플로 템플릿(core/workflows/*.yml): 사이트 cron 줄(CORE-PULL-KEEP 블록)은 지키고 나머지만 갱신
+        wf_changed = sync_workflows(after)
+        r["workflows_changed"] = wf_changed; changed += wf_changed
         # 검사: py_compile
         pyc = [p for p in (after / "tools").glob("*.py")]
         bad = [str(p.name) for p in pyc if sh(f"python3 -m py_compile '{p}'", after).returncode]
@@ -77,11 +83,35 @@ def main():
         r["protected"] = protected("\n".join(changed + file_diff))
     ok = r["py_compile"] == "ok" and r["preflight_syntax"] == "ok" and r["site_build_check"] == "ok" and r["test_pwa"] in ("ok", "skip") and r["html_gate"] == "pass"
     r["checks_pass"] = ok
+    if a.pull:
+        if ok and changed:
+            for f in M["files"]:
+                d = clone / f["dst"]; d.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(CORE / f["src"], d)
+            sync_workflows(clone)
+            r["pulled"] = changed
+        elif not changed: r["pulled"] = "변경 없음"
     if a.apply and changed and ok:
         if os.environ.get("CORE_STAGE_LOCK") != "unlocked": r["apply"] = "잠김(CORE_STAGE_LOCK). 3단계 전에는 PR 안 만듦"
         else: r["apply"] = open_pr(a.site, clone, r, a.pr_body)
     print(json.dumps(r, ensure_ascii=False, indent=1))
     sys.exit(0 if ok else 1)
+
+def sync_workflows(root):
+    """core/workflows/<name>.yml → <root>/.github/workflows/<name>.yml. 사이트의 cron 블록(# CORE-PULL-KEEP 다음부터 다음 빈 줄/키까지)은 보존."""
+    out = []
+    wd = CORE / "core" / "workflows"
+    if not wd.exists(): return out
+    for src in sorted(wd.glob("*.yml")):
+        dst = root / ".github" / "workflows" / src.name
+        new = src.read_text()
+        if dst.exists():
+            old = dst.read_text()
+            mk = re.compile(r"(^[ \t]*#[ \t]*CORE-PULL-KEEP[^\n]*\n)((?:[ \t]*- cron:[^\n]*\n)+)", re.M)
+            mo, mn = mk.search(old), mk.search(new)
+            if mo and mn: new = new[:mn.start(2)] + mo.group(2) + new[mn.end(2):]
+            if old == new: continue
+        dst.parent.mkdir(parents=True, exist_ok=True); dst.write_text(new); out.append(".github/workflows/" + src.name)
+    return out
 
 def run_pwa(root):
     if not (root / "tools/test_pwa.py").exists(): return []

@@ -282,6 +282,20 @@ def call_gemini(prompt, key, model, meta=None, allow_fallback=True):
     raise SystemExit(msg)
 
 
+def cap_kept(out, items, select):
+    """묶음 호출 뒤 전체 상한 재적용(2026-10-29): keep=true 가 select 보다 많으면 후보 입력 순서(고르기 우선순위) 뒤쪽부터 keep=false."""
+    order = {it["key"]: i for i, it in enumerate(items)}
+    kept = sorted([s for s in out.get("stories") or [] if s.get("keep") is not False], key=lambda s: order.get(s.get("key"), 1 << 30))
+    for s in kept[select:]:
+        s["keep"] = False; s["drop_reason"] = "상한 초과(묶음 뒤 재적용)"
+    dropped = {s.get("key") for s in kept[select:]}
+    if dropped:
+        out["highlights"] = [k for k in out.get("highlights") or [] if k not in dropped]
+        out["briefing"] = [b for b in out.get("briefing") or [] if b.get("story_key") not in dropped]
+        print("상한 재적용: keep %d → %d (%d건 keep=false)" % (len(kept), min(len(kept), select), len(dropped)))
+    return out
+
+
 def merge_model_outs(outs):
     """청크별 제미나이 JSON 합치기(stories·briefing·highlights)."""
     stories, briefing, highlights = [], [], []
@@ -745,11 +759,15 @@ def main():
     PRIMARY_PHASE_T0 = time.time()
     outs = []
     for ci, ch in enumerate(chunks):
-        sel = 0 if len(chunks) > 1 else a.select
+        # 2026-10-29 S2(Claude): 묶음(청크)일 때도 고르기 상한을 버리지 않는다 — 청크마다 비례 상한, 합친 뒤 전체 상한 재적용.
+        #   (10/29 vn md: 상한 25인데 31건 발행 — 청크 분기에서 sel=0 으로 상한이 통째로 빠졌던 것)
+        sel = a.select if len(chunks) == 1 else (-(-a.select * len(ch) // len(items)) if a.select else 0)
         prompt = build_prompt(a.eid, ch, fx_line, sel)
         print("제미나이 호출 %d/%d · 기사 %d건 · 지시문 %d자" % (ci + 1, len(chunks), len(ch), len(prompt)))
         outs.append(call_gemini(prompt, key, a.model, meta=dict(meta, chunk="%d/%d" % (ci + 1, len(chunks)))))
     out = merge_model_outs(outs) if len(outs) > 1 else outs[0]
+    if a.select and len(outs) > 1:
+        out = cap_kept(out, items, a.select)
     data = assemble(a.eid, items, out)
     if fx:
         data["fx"] = fx

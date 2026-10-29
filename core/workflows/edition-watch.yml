@@ -1,0 +1,37 @@
+# 판 공백 감시 템플릿 (news-core S2). 읽기만. 사이트별 판 시각은 site/<lang>.json watch_slots 에서(코드에 안 박음).
+# GitHub 예약은 늦거나 빠질 수 있어 매시 — 한두 번 빠져도 다음 시간에 잡음(설계서 2-5: 근본 해결은 미니PC 러너).
+name: edition-watch
+on:
+  schedule:
+    # CORE-PULL-KEEP
+    - cron: "50 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "이슈를 열지 않고 결과만 출력"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: edition-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Bangkok
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            tools/edition_watch.py
+            tools/siteconf.py
+            site
+          sparse-checkout-cone-mode: false
+      - name: 라이브 판 공백 확인(→ 늦으면 이슈)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/edition_watch.py ${{ inputs.dry_run && '--dry-run' || '' }}

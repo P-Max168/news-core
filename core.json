@@ -1,7 +1,7 @@
 {
  "version": 1,
- "stage": 2,
- "source_of_truth": "core/tools (2026-10-29 S0 refresh, Claude): 29개 갱신 + 기존 코어에 없던 공통 12개·dev 23개 추가. 기준: thai-news-kr aff53a0 / thai-news-zh ae4f73c / vn-news-kr aa6e4f5. edition_claim·gemini_spend·video_picks=kr, newslib=zh(<1元 소수), pending=zh 가드판. 아직 코어에 안 넣은 공통: deploy.sh·edition_stale.py·gpt_lane_check.py — 사이트별 값이 코드에 박혀 있어 S2(설정화) 뒤 추가.",
+ "stage": 3,
+ "source_of_truth": "core/tools (2026-10-29 S0 refresh, Claude): 29개 갱신 + 기존 코어에 없던 공통 12개·dev 23개 추가. 기준: thai-news-kr aff53a0 / thai-news-zh ae4f73c / vn-news-kr aa6e4f5. edition_claim·gemini_spend·video_picks=kr, newslib=zh(<1元 소수), pending=zh 가드판. 아직 코어에 안 넣은 공통: deploy.sh·edition_stale.py·gpt_lane_check.py — 사이트별 값이 코드에 박혀 있어 S2(설정화) 뒤 추가. | S2(2026-10-29): run_edition.py(공통 실행기)·deploy.sh(설정화)·edition_stale.py(설정화)·workflows 템플릿 추가, gemini_edition 묶음 상한 재적용.",
  "files": [
   {
    "src": "core/tools/adsafe.py",
@@ -26,6 +26,10 @@
   {
    "src": "core/tools/comment_replies.py",
    "dst": "tools/comment_replies.py"
+  },
+  {
+   "src": "core/tools/deploy.sh",
+   "dst": "tools/deploy.sh"
   },
   {
    "src": "core/tools/dev/audit_first.py",
@@ -132,6 +136,10 @@
    "dst": "tools/edition_claim.py"
   },
   {
+   "src": "core/tools/edition_stale.py",
+   "dst": "tools/edition_stale.py"
+  },
+  {
    "src": "core/tools/edition_watch.py",
    "dst": "tools/edition_watch.py"
   },
@@ -210,6 +218,10 @@
   {
    "src": "core/tools/publisher_guard.py",
    "dst": "tools/publisher_guard.py"
+  },
+  {
+   "src": "core/tools/run_edition.py",
+   "dst": "tools/run_edition.py"
   },
   {
    "src": "core/tools/screenshot.py",
@@ -316,8 +328,7 @@
   "basis": "추정(공개 flash 단가 가정, 청구서로 보정 필요)"
  },
  "pending_s2": [
-  "tools/deploy.sh",
-  "tools/edition_stale.py",
-  "tools/gpt_lane_check.py"
- ]
+  "tools/gpt_lane_check.py (KR research 경로 → 설정화 뒤)"
+ ],
+ "pull_mode": "사이트가 .core-version 태그로 당겨옴(core-pull.yml → sync.py --pull). 설계서 3-2."
 }

@@ -1,0 +1,45 @@
+# news-core 당겨오기 (설계서 3-2, 당겨오기·태그 고정). 사이트가 .core-version 의 태그로 news-core(공개)를 받아 공통 파일을 복사하고
+# 검사한 뒤 PR 을 만든다. 토큰 불필요(기본 GITHUB_TOKEN). 병합은 사람이(처음 2주) — 이후 검사 통과 시 자동 병합으로 바꿀 수 있음.
+name: core-pull
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "news-core 태그 (비우면 .core-version 의 값)"
+        required: false
+        default: ""
+  push:
+    paths: [".core-version"]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: news-core 받기
+        id: core
+        run: |
+          V="${{ inputs.version }}"; [ -n "$V" ] || V="$(tr -d '[:space:]' < .core-version)"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          git clone -q --depth 1 --branch "$V" https://github.com/P-Max168/news-core /tmp/news-core
+      - name: 복사·검사 (sync.py --pull)
+        run: python3 /tmp/news-core/sync.py --pull --clone . --site "$(tr -d '[:space:]' < site/LANG)"
+      - name: PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.core.outputs.version }}"
+          git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "$V" > .core-version
+          git checkout -q -B "core/$V"
+          git add -A
+          if git diff --cached --quiet; then echo "변경 없음(이미 $V)"; exit 0; fi
+          git commit -q -m "core: $V 당겨오기"
+          git push -q -f origin "core/$V"
+          gh pr create -B main -H "core/$V" -t "core: $V" -b "news-core $V 공통 파일 반영. 검사 결과는 Actions 로그(sync.py). 병합 전 설계서 6장 표대로 확인." || gh pr edit "core/$V" -b "갱신 $(date -u +%FT%TZ)"
