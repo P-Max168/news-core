@@ -48,6 +48,8 @@ def main():
     ap.add_argument("--pr-body", default="")
     ap.add_argument("--pull", action="store_true", help="당겨오기 모드(2026-10-29): 검사 통과 시 --clone 작업 폴더에 공통 파일을 직접 복사(커밋·PR은 호출한 워크플로가)")
     a = ap.parse_args()
+    a.site = {"ko": "kr"}.get(a.site, a.site)   # site/LANG 은 ko, core.json 의 사이트 키는 kr (2026-10-29)
+    if a.site not in M["sites"]: raise SystemExit(f"모르는 사이트: {a.site} (core.json sites: {list(M['sites'])})")
     clone = pathlib.Path(a.clone).resolve(); r = {"site": a.site, "dry_run": not (a.apply or a.pull)}
     why = skip(a.site, clone)
     if why: r["skipped"] = why; print(json.dumps(r, ensure_ascii=False)); return
