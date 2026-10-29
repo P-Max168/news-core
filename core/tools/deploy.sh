@@ -68,6 +68,8 @@ fi
 # YouTube Tower ops/video (md 판에서 생성). 디렉터리가 있을 때만 스테이징
 [ -d ops/video ] && PATHS="$PATHS ops/video"
 git add -A -- $PATHS
+# 성공한 판은 ops/edition-fail.json 을 지운다(gemini_edition). 지워진 파일은 위 루프(-e)에 안 잡히므로 삭제를 따로 스테이징(2026-10-29)
+if [ ! -e ops/edition-fail.json ] && git ls-files --error-unmatch ops/edition-fail.json >/dev/null 2>&1; then git rm -q --cached ops/edition-fail.json; fi
 git reset -q -- $KOREA_FILES 2>/dev/null || true   # 혹시 스테이징됐어도 빼기
 if git diff --cached --quiet; then
   echo "변경 없음 — 커밋 생략"
