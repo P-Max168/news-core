@@ -1,7 +1,7 @@
 {
  "version": 1,
  "stage": 2,
- "source_of_truth": "core/tools (2026-10-29 stage3 prep: edition_watch·legal_pages를 라이브 3사이트와 동일하게 맞춤 — 10/27 md 슬롯·gap marker, 10/28 개인정보 Cloudflare·GA4 반영. 기준 md5: edition_watch d550a664… / legal_pages eacfca62…)",
+ "source_of_truth": "core/tools (2026-10-29 S0 refresh, Claude): 29개 갱신 + 기존 코어에 없던 공통 12개·dev 23개 추가. 기준: thai-news-kr aff53a0 / thai-news-zh ae4f73c / vn-news-kr aa6e4f5. edition_claim·gemini_spend·video_picks=kr, newslib=zh(<1元 소수), pending=zh 가드판. 아직 코어에 안 넣은 공통: deploy.sh·edition_stale.py·gpt_lane_check.py — 사이트별 값이 코드에 박혀 있어 S2(설정화) 뒤 추가.",
  "files": [
   {
    "src": "core/tools/adsafe.py",
@@ -16,8 +16,112 @@
    "dst": "tools/canon_guard.sh"
   },
   {
+   "src": "core/tools/code_picks.py",
+   "dst": "tools/code_picks.py"
+  },
+  {
    "src": "core/tools/collect.py",
    "dst": "tools/collect.py"
+  },
+  {
+   "src": "core/tools/comment_replies.py",
+   "dst": "tools/comment_replies.py"
+  },
+  {
+   "src": "core/tools/dev/audit_first.py",
+   "dst": "tools/dev/audit_first.py"
+  },
+  {
+   "src": "core/tools/dev/bigtext.py",
+   "dst": "tools/dev/bigtext.py"
+  },
+  {
+   "src": "core/tools/dev/campaign_check.cjs",
+   "dst": "tools/dev/campaign_check.cjs"
+  },
+  {
+   "src": "core/tools/dev/campaign_resilience.cjs",
+   "dst": "tools/dev/campaign_resilience.cjs"
+  },
+  {
+   "src": "core/tools/dev/contrast.js",
+   "dst": "tools/dev/contrast.js"
+  },
+  {
+   "src": "core/tools/dev/finish.py",
+   "dst": "tools/dev/finish.py"
+  },
+  {
+   "src": "core/tools/dev/header_worst.py",
+   "dst": "tools/dev/header_worst.py"
+  },
+  {
+   "src": "core/tools/dev/i18n_scan.py",
+   "dst": "tools/dev/i18n_scan.py"
+  },
+  {
+   "src": "core/tools/dev/i18n_wrap.py",
+   "dst": "tools/dev/i18n_wrap.py"
+  },
+  {
+   "src": "core/tools/dev/lang_check.py",
+   "dst": "tools/dev/lang_check.py"
+  },
+  {
+   "src": "core/tools/dev/log_check.py",
+   "dst": "tools/dev/log_check.py"
+  },
+  {
+   "src": "core/tools/dev/pageshot.py",
+   "dst": "tools/dev/pageshot.py"
+  },
+  {
+   "src": "core/tools/dev/pending_check.py",
+   "dst": "tools/dev/pending_check.py"
+  },
+  {
+   "src": "core/tools/dev/perf.py",
+   "dst": "tools/dev/perf.py"
+  },
+  {
+   "src": "core/tools/dev/perf_breakdown.py",
+   "dst": "tools/dev/perf_breakdown.py"
+  },
+  {
+   "src": "core/tools/dev/regress.py",
+   "dst": "tools/dev/regress.py"
+  },
+  {
+   "src": "core/tools/dev/ship.sh",
+   "dst": "tools/dev/ship.sh"
+  },
+  {
+   "src": "core/tools/dev/shoot.py",
+   "dst": "tools/dev/shoot.py"
+  },
+  {
+   "src": "core/tools/dev/sync_core.py",
+   "dst": "tools/dev/sync_core.py"
+  },
+  {
+   "src": "core/tools/dev/sync_core.sh",
+   "dst": "tools/dev/sync_core.sh"
+  },
+  {
+   "src": "core/tools/dev/tag.sh",
+   "dst": "tools/dev/tag.sh"
+  },
+  {
+   "src": "core/tools/dev/test_gemini_edition_quarantine.py",
+   "dst": "tools/dev/test_gemini_edition_quarantine.py"
+  },
+  {
+   "src": "core/tools/dev/test_gemini_spend.py",
+   "dst": "tools/dev/test_gemini_spend.py"
+  },
+  {
+   "src": "core/tools/dev/test_money_round.py",
+   "dst": "tools/dev/test_money_round.py"
   },
   {
    "src": "core/tools/discussion.py",
@@ -26,10 +130,6 @@
   {
    "src": "core/tools/edition_claim.py",
    "dst": "tools/edition_claim.py"
-  },
-  {
-   "src": "core/tools/edition_stale.py",
-   "dst": "tools/edition_stale.py"
   },
   {
    "src": "core/tools/edition_watch.py",
@@ -54,6 +154,14 @@
   {
    "src": "core/tools/firebase_config.json",
    "dst": "tools/firebase_config.json"
+  },
+  {
+   "src": "core/tools/gemini_edition.py",
+   "dst": "tools/gemini_edition.py"
+  },
+  {
+   "src": "core/tools/gemini_spend.py",
+   "dst": "tools/gemini_spend.py"
   },
   {
    "src": "core/tools/gen_time_check.py",
@@ -88,8 +196,16 @@
    "dst": "tools/metrics.py"
   },
   {
+   "src": "core/tools/newslib.py",
+   "dst": "tools/newslib.py"
+  },
+  {
    "src": "core/tools/pending.py",
    "dst": "tools/pending.py"
+  },
+  {
+   "src": "core/tools/preflight.sh",
+   "dst": "tools/preflight.sh"
   },
   {
    "src": "core/tools/publisher_guard.py",
@@ -98,6 +214,22 @@
   {
    "src": "core/tools/screenshot.py",
    "dst": "tools/screenshot.py"
+  },
+  {
+   "src": "core/tools/seo.py",
+   "dst": "tools/seo.py"
+  },
+  {
+   "src": "core/tools/share_kit.py",
+   "dst": "tools/share_kit.py"
+  },
+  {
+   "src": "core/tools/site_build.py",
+   "dst": "tools/site_build.py"
+  },
+  {
+   "src": "core/tools/siteconf.py",
+   "dst": "tools/siteconf.py"
   },
   {
    "src": "core/tools/stamp_assets.py",
@@ -118,6 +250,10 @@
   {
    "src": "core/tools/verify_live.py",
    "dst": "tools/verify_live.py"
+  },
+  {
+   "src": "core/tools/video_picks.py",
+   "dst": "tools/video_picks.py"
   }
  ],
  "rollout_order": [
@@ -178,5 +314,10 @@
   "usd_per_1m_output": 2.5,
   "thb_per_usd": 33.0,
   "basis": "추정(공개 flash 단가 가정, 청구서로 보정 필요)"
- }
+ },
+ "pending_s2": [
+  "tools/deploy.sh",
+  "tools/edition_stale.py",
+  "tools/gpt_lane_check.py"
+ ]
 }

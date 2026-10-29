@@ -9,6 +9,7 @@
   python3 tools/edition_claim.py check <누구> <판 id>     # 배포 직전 확인. 다른 담당이 '나중에' 가져갔으면 HOLD(exit 4)
   python3 tools/edition_claim.py status <판 id>           # 누가 표시했는지 출력
   python3 tools/edition_claim.py take <누구> <판 id>      # 비상 인수(Claude 07:30 재확인용): 다른 담당이 있어도 표시
+  python3 tools/edition_claim.py release <누구> <판 id>   # 발행 성공·최종 실패 뒤 내 표시 삭제(Claude 비상 차단 해제)
 누구 = grok | codex | claude.
 규칙: 한 판에 담당이 둘이면, claude 표시가 있으면 claude 가 이긴다(비상 인수). 그 외에는 먼저 표시한 쪽.
 3일 지난 claim 브랜치는 claim 할 때 함께 지운다.
@@ -75,7 +76,7 @@ def main(argv):
         print("%s: %s" % (ed, ", ".join(claims().get(ed, [])) or "표시 없음"))
         return 0
     if len(argv) < 4 or argv[2] not in ACTORS or not ID_RE.match(argv[3]):
-        print("사용법: claim|check|take <grok|codex|claude> <YYYY-MM-DD-am|pm|md>", file=sys.stderr); return 2
+        print("사용법: claim|check|take|release <grok|codex|claude> <YYYY-MM-DD-am|pm|md>", file=sys.stderr); return 2
     actor, ed = argv[2], argv[3]
     allc = claims()
     names = allc.get(ed, [])
@@ -100,6 +101,14 @@ def main(argv):
             print("CLAIM HOLD: %s 는 %s 가 맡음 — 배포하지 말 것" % (ed, w), file=sys.stderr)
             return 4
         print("CLAIM OK: %s" % ed)
+        return 0
+    if cmd == "release":
+        # 내 표시만 지움. 다른 담당(claude) 표시는 건드리지 않음.
+        if actor in names:
+            push("refs/heads/claim/%s/%s" % (ed, actor), delete=True)
+            print("CLAIM RELEASE: %s ← %s" % (ed, actor))
+        else:
+            print("CLAIM RELEASE: %s — %s 표시 없음" % (ed, actor))
         return 0
     print("모르는 명령:", cmd, file=sys.stderr)
     return 2
