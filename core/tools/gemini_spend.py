@@ -32,6 +32,7 @@ BKK = timezone(timedelta(hours=7))
 
 # --- 설정(환경 변수로 덮어쓰기 가능) ---
 DAILY_CAP_THB = float(os.environ.get("GEMINI_DAILY_CAP_THB", "200"))
+CAP_FROM_ENV = "GEMINI_DAILY_CAP_THB" in os.environ   # 2026-10-29: 환경변수로 준 상한이 원장에 저장된 cap 보다 우선(시험 저장소 30바트)
 USD_THB = float(os.environ.get("GEMINI_USD_THB", "34.0"))
 HUB_REPO = os.environ.get("GEMINI_SPEND_HUB_REPO", "P-Max168/thai-news-kr")
 HUB_PATH = os.environ.get("GEMINI_SPEND_HUB_PATH", "ops/gemini-spend.json")
@@ -231,7 +232,7 @@ def _recompute(tally):
     out.update(
         day=day,
         tz="Asia/Bangkok",
-        cap_thb=float(tally.get("cap_thb") or DAILY_CAP_THB),
+        cap_thb=(DAILY_CAP_THB if CAP_FROM_ENV else float(tally.get("cap_thb") or DAILY_CAP_THB)),
         usd_thb=float(tally.get("usd_thb") or USD_THB),
         pricing_source=tally.get("pricing_source") or PRICING_SOURCE,
         pricing_read=tally.get("pricing_read") or PRICING_READ,
@@ -699,7 +700,7 @@ def check_can_call(root, model, prompt_text, assumed_output=None, day=None, toke
     spent = float(tally.get("spent_thb") or 0)
     reserved = float(tally.get("reserved_thb") or 0)
     est = estimate_next_thb(model, prompt_text, assumed_output=assumed_output)
-    cap = float(tally.get("cap_thb") or DAILY_CAP_THB)
+    cap = (DAILY_CAP_THB if CAP_FROM_ENV else float(tally.get("cap_thb") or DAILY_CAP_THB))
     if spent + reserved + est > cap + 1e-9:
         raise SpendCapExceeded(spent, est, cap, day, reserved_thb=reserved)
     return True, spent, est, cap, tally
@@ -762,7 +763,7 @@ def reserve_or_raise(root, model, prompt_text, meta=None, assumed_output=None, w
     def mutator(tally):
         spent = float(tally.get("spent_thb") or 0)
         reserved = float(tally.get("reserved_thb") or 0)
-        cap = float(tally.get("cap_thb") or DAILY_CAP_THB)
+        cap = (DAILY_CAP_THB if CAP_FROM_ENV else float(tally.get("cap_thb") or DAILY_CAP_THB))
         if spent + reserved + est > cap + 1e-9:
             raise SpendCapExceeded(spent, est, cap, day, reserved_thb=reserved)
         reservations = list(tally.get("reservations") or [])

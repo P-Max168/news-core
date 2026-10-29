@@ -5,7 +5,6 @@
  "pool": 40,
  "select": 25,
  "claim": false,
- "publisher": "code",
  "deploy": "cloudflare",
  "deploy_cmd": "python3 pipeline/build_dist.py && npx --yes wrangler@4.152.0 deploy --config wrangler.json",
  "live_check": "curl",

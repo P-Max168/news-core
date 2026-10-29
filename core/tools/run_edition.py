@@ -178,7 +178,9 @@ def main():
     a = ap.parse_args()
     now = datetime.strptime(a.now, "%Y-%m-%d %H:%M").replace(tzinfo=BKK) if a.now else datetime.now(BKK)
     t0 = time.time(); OPS.mkdir(exist_ok=True)
-    env = {"TNK_LANG": C["lang"], "TNK_PUBLISHER": E["publisher"]}
+    env = {"TNK_LANG": C["lang"]}
+    if E["claim"]:   # 담당 표시를 쓰는 채널(KR·ZH)만. VN 처럼 담당 개념이 없으면 deploy.sh 는 기본(grok)으로 검사 → 표시 없음 = OK
+        env["TNK_PUBLISHER"] = E["publisher"]
     log("사이트 %s · picker=%s deploy=%s claim=%s" % (C["lang"], E["picker"], E["deploy"], E["claim"]))
 
     if E["pre_cmd"]:

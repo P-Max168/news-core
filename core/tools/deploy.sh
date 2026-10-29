@@ -56,7 +56,7 @@ fi
 # 사이트 파일만 스테이징 (.gitignore 가 제외 대상 차단)
 # og/(링크 미리보기 이미지)·e/(판별 미리보기 페이지)는 tools/share_kit.py 가 만듦 — 있는 경로만 추가
 PATHS=""
-for p in index.html robots.txt sitemap.xml feed.xml .nojekyll .gitignore README.md manifest.json sw.js firestore.rules assets data tools og e .github ops/metrics.jsonl ops/last-run.json ops/published.json ops/source-verify.json ops/picks ops/gemini-usage.jsonl; do
+for p in index.html robots.txt sitemap.xml feed.xml .nojekyll .gitignore README.md manifest.json sw.js firestore.rules assets data tools og e .github ops/metrics.jsonl ops/last-run.json ops/published.json ops/source-verify.json ops/picks ops/gemini-usage.jsonl ops/edition-fail.json; do   # edition-fail.json: 성공하면 지운 것도 커밋돼야 옛 실패가 안 남음(2026-10-29)
   [ -e "$p" ] && PATHS="$PATHS $p"
 done
 # IndexNow 공개 키 파일(ops/indexnow-key 내용 = 파일명)도 스테이징
