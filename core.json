@@ -1,7 +1,7 @@
 {
  "version": 1,
  "stage": 2,
- "source_of_truth": "core/tools (기준: thai-news-kr e78cc94 이후 main, 2026-10-26 세 사이트 md5 동일 29개)",
+ "source_of_truth": "core/tools (2026-10-29 stage3 prep: edition_watch·legal_pages를 라이브 3사이트와 동일하게 맞춤 — 10/27 md 슬롯·gap marker, 10/28 개인정보 Cloudflare·GA4 반영. 기준 md5: edition_watch d550a664… / legal_pages eacfca62…)",
  "files": [
   {
    "src": "core/tools/adsafe.py",

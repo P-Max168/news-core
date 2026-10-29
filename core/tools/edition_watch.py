@@ -16,12 +16,12 @@
   python3 tools/edition_watch.py --dry-run                         # 라이브 확인만, 이슈 안 엶(본문 출력)
   python3 tools/edition_watch.py --dry-run --now "2026-10-11 09:00" --latest 2026-10-05-am --generated 2026-10-05T07:23:46+07:00   # 부숴 보기
   (--now/--latest/--generated 흉내는 --dry-run 일 때만 받음 — 진짜 이슈를 가짜 값으로 열지 않게)"""
-import datetime as dt, json, os, random, re, sys, time, urllib.error, urllib.request
+import datetime as dt, json, os, pathlib, random, re, sys, time, urllib.error, urllib.request
 
 BKK = dt.timezone(dt.timedelta(hours=7))
 SITE = "https://tnews.pmaxone.com/"
 REPO = os.environ.get("GITHUB_REPOSITORY", "P-Max168/thai-news-kr")
-SLOTS = [("am", 6, 40), ("pm", 17, 40)]   # 2026-10-23 맥스님: 시작 06:40·17:40(게시 목표 07:00·18:00)
+SLOTS = [("am", 6, 40), ("md", 11, 40), ("pm", 17, 40)]   # 2026-10-27 맥스님: 하루 3판
 # 언어판(R-zh-5, 2026-10-18): site/<lang>.json 의 site_url·watch_slots(예 zh 시험 = [["md", 13, 0]]). 한국판은 위 값 그대로
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +36,19 @@ except Exception as _e:   # 설정을 못 읽으면 한국판 기본값(감시�
 LIMIT_MIN = 90
 LABEL = "edition-gap"
 MENTION = "@P-Max168"
+
+
+def write_gap_marker(latest, expected_ed, now, reason):
+    """ops/edition-gap.json + ops/LATEST_GAP.md — 맥스님·그록이 바로 읽는 표식."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    ops = root / "ops"; ops.mkdir(exist_ok=True)
+    rec = dict(at=now.isoformat(timespec="seconds"), latest=latest, expected=expected_ed, reason=reason, site=SITE)
+    (ops / "edition-gap.json").write_text(json.dumps(rec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    lines = ["# 판 공백", "", "- 시각(BKK): %s" % rec["at"], "- 라이브 latest: `%s`" % latest,
+             "- 기대 판: `%s`" % expected_ed, "- 이유: %s" % reason, "- 사이트: %s" % SITE, ""]
+    (ops / "LATEST_GAP.md").write_text("\n".join(lines), encoding="utf-8")
+    with open(ops / "edition-gap.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def expected(now):
@@ -191,8 +204,10 @@ def main(argv):
         issues = []
     same = [i for i in issues if i[1] == latest]
     if same:
+        write_gap_marker(latest, ed, now, "이미 알린 공백(이슈 #%d)" % same[0][0])
         print("이미 알린 공백: 열린 이슈 #%d (latest=%s, 처음 기대 %s) — 새 이슈 안 엶" % (same[0][0], same[0][1], same[0][2]))
         return 0
+    write_gap_marker(latest, ed, now, "예정보다 %d분 늦음" % late)
     print("공백: 예정보다 %d분 늦음 — 새 이슈 %s" % (late, "열 예정(dry-run, 안 엶)" if dry else "엶"))
     print("---- 이슈 제목 ----\n%s\n---- 이슈 본문 ----\n%s\n----" % (title, body))
     if dry:
