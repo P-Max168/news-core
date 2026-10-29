@@ -13,8 +13,14 @@ def sh(cmd, cwd, check=False, env=None):
     if check and p.returncode: raise SystemExit(f"FAIL: {cmd}\n{p.stdout[-2000:]}{p.stderr[-2000:]}")
     return p
 
+def skip_paths(clone):
+    """.core-skip 에 적힌 경로(한 줄에 하나, 글롭 가능)는 당겨오지 않음. 파일이 비어 있으면 전체 중지(skip)."""
+    f = clone / ".core-skip"
+    if not f.exists(): return []
+    return [l.strip() for l in f.read_text().splitlines() if l.strip() and not l.startswith("#")]
+
 def skip(site, clone):
-    if (clone / ".core-skip").exists(): return ".core-skip 파일"
+    if (clone / ".core-skip").exists() and not skip_paths(clone): return ".core-skip 파일(비어 있음 = 전체 중지)"
     p = sh(f"gh variable get CORE_SYNC -R {M['sites'][site]['repo']}", clone)
     if p.returncode == 0 and p.stdout.strip().lower() == "off": return "CORE_SYNC=off"
     return None
@@ -50,7 +56,10 @@ def main():
         before, after = pathlib.Path(td, "before"), pathlib.Path(td, "after")
         shutil.copytree(clone, before, ignore=shutil.ignore_patterns(".git")); shutil.copytree(clone, after, ignore=shutil.ignore_patterns(".git"))
         file_diff, changed = [], []
+        import fnmatch
+        skips = skip_paths(clone); r["skip_paths"] = skips
         for f in M["files"]:
+            if any(fnmatch.fnmatch(f["dst"], pat) for pat in skips): continue
             s, d = CORE / f["src"], after / f["dst"]
             old = d.read_text(errors="replace") if d.exists() else ""
             new = s.read_text(errors="replace")
@@ -59,7 +68,7 @@ def main():
                 shutil.copy2(s, d)
         r["files_changed"] = changed; r["file_diff_lines"] = len(file_diff)
         # 워크플로 템플릿(core/workflows/*.yml): 사이트 cron 줄(CORE-PULL-KEEP 블록)은 지키고 나머지만 갱신
-        wf_changed = sync_workflows(after)
+        wf_changed = sync_workflows(after, skips)
         r["workflows_changed"] = wf_changed; changed += wf_changed
         # 검사: py_compile
         pyc = [p for p in (after / "tools").glob("*.py")]
@@ -86,8 +95,9 @@ def main():
     if a.pull:
         if ok and changed:
             for f in M["files"]:
+                if any(fnmatch.fnmatch(f["dst"], pat) for pat in skips): continue
                 d = clone / f["dst"]; d.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(CORE / f["src"], d)
-            sync_workflows(clone)
+            sync_workflows(clone, skips)
             r["pulled"] = changed
         elif not changed: r["pulled"] = "변경 없음"
     if a.apply and changed and ok:
@@ -96,12 +106,15 @@ def main():
     print(json.dumps(r, ensure_ascii=False, indent=1))
     sys.exit(0 if ok else 1)
 
-def sync_workflows(root):
+def sync_workflows(root, skips=()):
     """core/workflows/<name>.yml → <root>/.github/workflows/<name>.yml. 사이트의 cron 블록(# CORE-PULL-KEEP 다음부터 다음 빈 줄/키까지)은 보존."""
+    import fnmatch
     out = []
     wd = CORE / "core" / "workflows"
     if not wd.exists(): return out
     for src in sorted(wd.glob("*.yml")):
+        rel = ".github/workflows/" + src.name
+        if any(fnmatch.fnmatch(rel, pat) for pat in skips): continue
         dst = root / ".github" / "workflows" / src.name
         new = src.read_text()
         if dst.exists():

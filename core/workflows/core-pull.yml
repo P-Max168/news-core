@@ -42,4 +42,12 @@ jobs:
           if git diff --cached --quiet; then echo "변경 없음(이미 $V)"; exit 0; fi
           git commit -q -m "core: $V 당겨오기"
           git push -q -f origin "core/$V"
-          gh pr create -B main -H "core/$V" -t "core: $V" -b "news-core $V 공통 파일 반영. 검사 결과는 Actions 로그(sync.py). 병합 전 설계서 6장 표대로 확인." || gh pr edit "core/$V" -b "갱신 $(date -u +%FT%TZ)"
+          # PR 은 REST 로. 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 가 꺼져 있으면 403 → 브랜치는 올라갔으니 안내만 하고 성공 처리
+          BODY="news-core $V 공통 파일 반영. 검사 결과는 Actions 로그(sync.py). 병합 전 설계서 6장 표대로 확인."
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/pulls" -f title="core: $V" -f head="core/$V" -f base=main -f body="$BODY" --jq '.html_url'; then :
+          else
+            n=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?head=${GITHUB_REPOSITORY_OWNER}:core/$V&state=open" --jq '.[0].number' 2>/dev/null || true)
+            if [ -n "$n" ] && [ "$n" != "null" ]; then echo "이미 열린 PR #$n 갱신됨"; else
+              echo "::warning::PR 자동 생성 불가(저장소 설정 Actions→General→'Allow GitHub Actions to create and approve pull requests' 필요). 브랜치 core/$V 는 올라감 — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...core/$V"
+            fi
+          fi
