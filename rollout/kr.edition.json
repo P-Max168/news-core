@@ -1,0 +1,11 @@
+{
+ "picker": "grok_file",
+ "pool": 30,
+ "select": 0,
+ "claim": true,
+ "publisher": "grok",
+ "deploy": "pages",
+ "live_check": "pages",
+ "video_feed": true,
+ "candidates_from": "own"
+}

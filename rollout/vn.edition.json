@@ -1,0 +1,46 @@
+{
+ "picker": "cmd",
+ "picker_cmd": "python3 pipeline/vn_picks.py {eid}",
+ "pre_cmd": "python3 pipeline/refresh_side.py",
+ "pool": 40,
+ "select": 25,
+ "claim": false,
+ "publisher": "code",
+ "deploy": "cloudflare",
+ "deploy_cmd": "python3 pipeline/build_dist.py && npx --yes wrangler@4.152.0 deploy --config wrangler.json",
+ "live_check": "curl",
+ "video_feed": true,
+ "candidates_from": "own",
+ "metrics_line": true,
+ "floor_minutes": {
+  "am": [
+   6,
+   30
+  ],
+  "md": [
+   11,
+   30
+  ],
+  "pm": [
+   17,
+   30
+  ]
+ },
+ "stale_slots": [
+  [
+   "am",
+   7,
+   30
+  ],
+  [
+   "md",
+   12,
+   30
+  ],
+  [
+   "pm",
+   18,
+   30
+  ]
+ ]
+}
