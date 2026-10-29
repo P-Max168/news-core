@@ -105,9 +105,22 @@ def fetch_candidates():
     sh("git fetch -q %s +candidates:refs/remotes/cand/candidates && git show cand/candidates:candidates/latest.json > drafts/candidates/latest.json" % src)
 
 
+def pushed_picks_id():
+    """push 이벤트(그록 picks 커밋): 마지막 커밋에서 바뀐 ops/picks/<id>.json 의 id. 하한보다 2~3분 일찍 올려도 그 판을 만들게(예전 yml 과 같음)."""
+    r = sh("git diff --name-only HEAD~1 HEAD -- 'ops/picks/*.json'", capture=True)
+    ids = [re.sub(r"^ops/picks/(.*)\.json$", r"\1", l.strip()) for l in r.stdout.splitlines() if l.strip()]
+    return ids[-1] if ids else ""
+
+
 def decide_edition(a, now):
     if a.edition:
         return a.edition, ""
+    if os.environ.get("GITHUB_EVENT_NAME") == "push":
+        pid = pushed_picks_id()
+        if pid:
+            if (ROOT / "data" / (pid + ".json")).exists():
+                return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(다시 만들려면 Run workflow 로 판 지정)" % pid
+            return pid, ""
     s = a.slot or slot_for(now)
     if not s:
         return None, "하한 전(지금 %s BKK) — 판 고르기 건너뜀" % now.strftime("%H:%M")

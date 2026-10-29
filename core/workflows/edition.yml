@@ -71,6 +71,8 @@ jobs:
           WRANGLER_SEND_METRICS: "false"
           TNK_LIVE_CHECK: pages
         run: |
+          # 저장소 변수가 비어 있으면 빈 문자열이 들어가 코드 기본값을 가림 → 빈 값은 지움
+          for v in GEMINI_MODEL GEMINI_FALLBACK_MODEL GEMINI_DAILY_CAP_THB SPEND_HUB_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [ -n "${!v}" ] || unset "$v"; done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python3 tools/run_edition.py ${{ inputs.edition && format('--edition {0}', inputs.edition) || '' }} ${{ inputs.dry && '--dry' || '' }}
