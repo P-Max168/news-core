@@ -37,9 +37,14 @@ git checkout -q main
 # 🇰🇷 data/korea.json|js · 💱 data/ticker.json|js(헤더 시세 칩)는 GitHub Actions(.github/workflows/korea.yml)가 2시간마다 갱신·커밋하는 파일
 # → 이 스크립트는 절대 올리지 않는다. 로컬 사본(오래됐을 수 있음)은 버리고 원격 것을 받는다(pull 때 충돌·덮어쓰기 방지).
 KOREA_FILES="data/korea.json data/korea.js data/ticker.json data/ticker.js"
-for f in $KOREA_FILES; do
-  if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then git checkout -q -- "$f"; else rm -f "$f"; fi
-done
+# (2026-10-29 공통화) 그 파일을 따로 갱신하는 워크플로(korea.yml·china.yml)가 있는 채널만 제외. VN 처럼 판 실행 안(refresh_side.py)에서 갱신하는 채널은 같이 커밋
+if [ -f .github/workflows/korea.yml ] || [ -f .github/workflows/china.yml ]; then
+  for f in $KOREA_FILES; do
+    if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then git checkout -q -- "$f"; else rm -f "$f"; fi
+  done
+else
+  KOREA_FILES=""
+fi
 # 검색 노출(2026-10-18 R-seo-2): sitemap.xml 을 data/index.json·e/ 에 맞춰 다시 만듦(share_kit 도 만들지만 한 번 더 — 실패해도 배포는 계속)
 python3 tools/seo.py sitemap || echo "경고: sitemap.xml 갱신 실패(배포는 계속)" >&2
 # IndexNow 키 파일만 보장(제출은 push 뒤)
@@ -70,7 +75,7 @@ fi
 git add -A -- $PATHS
 # 성공한 판은 ops/edition-fail.json 을 지운다(gemini_edition). 지워진 파일은 위 루프(-e)에 안 잡히므로 삭제를 따로 스테이징(2026-10-29)
 if [ ! -e ops/edition-fail.json ] && git ls-files --error-unmatch ops/edition-fail.json >/dev/null 2>&1; then git rm -q --cached ops/edition-fail.json; fi
-git reset -q -- $KOREA_FILES 2>/dev/null || true   # 혹시 스테이징됐어도 빼기
+[ -n "$KOREA_FILES" ] && { git reset -q -- $KOREA_FILES 2>/dev/null || true; }   # 혹시 스테이징됐어도 빼기
 if git diff --cached --quiet; then
   echo "변경 없음 — 커밋 생략"
 else

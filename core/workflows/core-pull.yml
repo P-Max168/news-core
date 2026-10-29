@@ -9,6 +9,7 @@ on:
         required: false
         default: ""
   push:
+    branches: [main]          # 브랜치 push(전환 PR 등)에는 돌지 않게(2026-10-29 운영 VN 에서 실제로 돈 사례)
     paths: [".core-version"]
 permissions:
   contents: write

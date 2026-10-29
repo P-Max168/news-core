@@ -126,7 +126,7 @@ def decide_edition(a, now):
         return None, "하한 전(지금 %s BKK) — 판 고르기 건너뜀" % now.strftime("%H:%M")
     eid = "%s-%s" % (now.strftime("%Y-%m-%d"), s)
     if (ROOT / "data" / (eid + ".json")).exists():
-        return None, "이미 있음: %s — 할 일 없음" % eid
+        return None, "이미 있음: %s — 할 일 없음|REDEPLOY:%s" % (eid, eid)
     if E["claim"] and not a.dry:
         if sh("git ls-remote origin 'refs/heads/claim/%s/*'" % eid, capture=True).stdout.strip():
             return None, "담당 표시 있음(%s) — 대비 실행 건너뜀" % eid
@@ -150,6 +150,23 @@ def make_picks(eid):
     fetch_candidates()
     r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(E["pool"]), "--select", str(E["select"] or 20)])
     return str(pf) if r.returncode == 0 and pf.exists() else None
+
+
+def redeploy_if_stale(eid, env):
+    """이미 저장된 판이 라이브에 없으면(배포 실패 뒤 재실행) deploy_cmd 만 다시. 라이브가 맞으면 아무것도 안 함."""
+    local_n = len(json.loads((ROOT / "data" / (eid + ".json")).read_text(encoding="utf-8"))["stories"])
+    url = C["site_url"].rstrip("/") + "/data/%s.json?_=%d" % (eid, int(time.time()))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (run_edition redeploy check)", "Cache-Control": "no-cache"}), timeout=20) as r:
+            if len(json.load(r).get("stories") or []) == local_n:
+                log("라이브도 %s(%d건) — 재배포 불필요" % (eid, local_n)); print("skip=1"); return 0
+    except Exception as ex:
+        log("라이브에 %s 없음(%s) — 저장된 판을 다시 배포" % (eid, str(ex)[:60]))
+    if sh(E["deploy_cmd"], env=env).returncode:
+        write_fail(eid, "redeploy_cmd_failed", stage="deploy"); push_fail_record(eid); return 5
+    if not live_check(eid, local_n):
+        write_fail(eid, "live_mismatch_after_redeploy", stage="verify"); push_fail_record(eid); return 5
+    log("재배포 완료:", eid); return 0
 
 
 def live_check(eid, local_n):
@@ -188,6 +205,12 @@ def main():
 
     eid, why = decide_edition(a, now)
     if not eid:
+        if "|REDEPLOY:" in why:   # 저장은 됐는데 배포가 안 된 판(Codex P1, 2026-10-29): Cloudflare 채널은 라이브 대조 뒤 배포만 다시 — 제미나이 호출 없음
+            why, done_eid = why.split("|REDEPLOY:")
+            log(why)
+            if E["deploy"] == "cloudflare" and E["deploy_cmd"] and not a.dry:
+                return redeploy_if_stale(done_eid, env)
+            print("skip=1"); return 0
         log(why); print("skip=1"); return 0
     log("판:", eid)
     if not os.environ.get("GEMINI_API_KEY") and not a.dry:
