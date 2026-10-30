@@ -13,7 +13,21 @@
    "max": 4,
    "sources": [
     "tools/sources.json"
-   ]
+   ],
+   "cutoff": {
+    "am": [
+     7,
+     5
+    ],
+    "md": [
+     12,
+     5
+    ],
+    "pm": [
+     18,
+     5
+    ]
+   }
   },
   "_picker_rollback": "되돌리기: picker 를 grok_file 로"
  },

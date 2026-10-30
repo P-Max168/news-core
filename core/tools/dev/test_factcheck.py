@@ -50,6 +50,13 @@ ok(not probs(dict(id="k5", title_th="น้ำท่วม", headline="촌부리
 ok(not probs(dict(id="k6", title_th="น้ำท่วม", headline="춤폰 홍수", summary=["춤폰주"]), ""), "본문 없으면 지명 검사 안 함")
 ok(not probs(dict(id="k7", title_th="EEC 4 แห่ง ชลบุรี-ระยอง", headline="촌부리·라용 EEC 특구"), "ชลบุรี ระยอง " * 40), "원문에 있는 주는 통과")
 
+# ---- 코덱스 리뷰 반영(2026-10-30)
+ok(not probs(dict(id="r1", title_th="เงินลงทุน 100-1,000 ล้านบาท", headline="최소 1억 바트 투자")), "범위 앞 숫자에도 단위(100-1,000 ล้าน → 1억 통과)")
+ok(not probs(dict(id="r2", title_th="กรุงเทพฯ รถติด", headline="曼谷等大城市交通拥堵"), "การจราจรติดขัดในกรุงเทพฯ " * 30), "'大城市'(큰 도시)를 아유타야로 보지 않음")
+ok(not probs(dict(id="r3", title_th="청마이 축제", headline="清迈水灯节"), "清迈水灯节今晚举行，" * 40), "중국어 원문에 '清迈' 있으면 통과")
+ok(not probs(dict(id="r4", title_th="푸켓 폭우", headline="푸켓 폭우로 도로 침수"), "푸켓에서 폭우가 쏟아져 도로가 잠겼다. " * 20), "한국어 원문에 '푸켓' 있으면 통과")
+ok(not probs(dict(id="r5", title_th="ข่าว", headline="프래그런스 브랜드 출시"), "ร้านค้าเปิดตัวน้ำหอม " * 30), "'프래그런스'를 프래주로 보지 않음")
+
 # ---- 위안 이중 환산 제거(gemini_edition._fix_text)
 sys.argv = [sys.argv[0]]
 try:

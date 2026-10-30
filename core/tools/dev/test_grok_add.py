@@ -89,5 +89,25 @@ doc = g.merge(base_doc, r, 25)
 ok([p["url"] for p in doc["picks"]] == ["https://www.khaosod.co.th/n1", BASE[1]["url"], BASE[0]["url"]], "합치기 순서: 추가 → boost → 기본")
 ok(doc["select"] == 25 and doc["picker"] == "code" and doc["grok_add"]["adds"] == 1, "합친 문서 select·기록")
 
+# ---- 코덱스 리뷰 반영(2026-10-30)
+src2 = tmp / "site.json"
+src2.write_text(json.dumps({"sources": [{"url": "https://e.vnexpress.net/rss", "production": False}, {"url": "https://thanhnien.vn/rss"}]}), encoding="utf-8")
+d2 = g.source_domains([str(src2)])
+ok("thanhnien.vn" in d2 and "e.vnexpress.net" not in d2, "production:false 수집처는 허용 목록에서 뺌")
+for bad in ([], None, {"edition": "2026-10-31-pm", "boost": ["https://www.khaosod.co.th/a"], "add": "x"}):
+    try:
+        r = run(bad, "bad.json"); okk = not r["adds"]
+    except Exception as ex:
+        okk = False; print("  예외:", ex)
+    ok(okk, "이상한 파일 모양도 예외 없이 코드 목록만: %r" % (bad,))
+cut = datetime(2026, 10, 31, 18, 5, tzinfo=BKK)
+doc = dict(edition="2026-10-31-pm", add=[add("https://www.khaosod.co.th/n1", "ไฟไหม้โรงงานระยอง")])
+r = run(doc, "late.json") if False else None
+f = tmp / "late.json"; f.write_text(json.dumps(doc), encoding="utf-8")
+r = g.load("2026-10-31-pm", BASE, dict(CONF, _cutoff=cut, _submitted=datetime(2026, 10, 31, 18, 20, tzinfo=BKK)), now=NOW, path=f)
+ok(not r["adds"] and r.get("late"), "마감 뒤 올라온 파일은 안 씀")
+r = g.load("2026-10-31-pm", BASE, dict(CONF, _cutoff=cut, _submitted=datetime(2026, 10, 31, 17, 55, tzinfo=BKK)), now=NOW, path=f)
+ok(len(r["adds"]) == 1, "마감 전 파일은 씀")
+
 print("\n결과:", "모두 통과" if not FAIL else "실패 %d: %s" % (len(FAIL), FAIL))
 sys.exit(1 if FAIL else 0)

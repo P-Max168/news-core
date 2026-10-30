@@ -226,11 +226,37 @@ def ensure_fresh_candidates(now=None):
     if not ((ROOT / "tools" / "collect.py").exists() and srcf.exists()):
         log("후보 목록 %.0f분 묵음 — 이 채널엔 수집기·수집처 목록이 없어 그대로 씀" % age); return age
     log("후보 목록 %.0f분 묵음 — 지금 다시 수집" % age)
-    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--sources", str(srcf),
-            "--out", str(ROOT / "drafts" / "candidates")])
-    if r.returncode:
-        log("다시 수집 실패(exit %d) — 묵은 목록으로 계속" % r.returncode)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="cand-"))
+    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--sources", str(srcf), "--out", str(tmp)])
+    # 새 목록이 충분할 때만 바꾼다 — 수집처가 한꺼번에 막히면 빈 목록이 묵은 목록을 덮어 판을 막던 위험(코덱스 리뷰)
+    def _n(p):
+        try:
+            return int(json.loads(p.read_text(encoding="utf-8")).get("candidates") or 0)
+        except Exception:
+            return 0
+    new_n, old_n = _n(tmp / "latest.json"), _n(lf)
+    if r.returncode == 0 and new_n >= max(30, old_n // 3):
+        shutil.copy2(tmp / "latest.json", lf)
+        log("다시 수집 완료: 후보 %d건(이전 %d건)" % (new_n, old_n))
+    else:
+        log("다시 수집 결과 부족(exit %d, %d건 / 이전 %d건) — 묵은 목록으로 계속" % (r.returncode, new_n, old_n))
+    shutil.rmtree(tmp, ignore_errors=True)
     return age
+
+
+def grok_file_time(eid):
+    """ops/grok-add/<판>.json 이 저장소에 처음 올라온 커밋 시각(BKK). 얕은 checkout 이면 이틀치 이력을 더 받아 본다. 모르면 None."""
+    f = "ops/grok-add/%s.json" % eid
+    if not (ROOT / f).exists():
+        return None
+    since = (datetime.now(BKK) - timedelta(days=2)).strftime("%Y-%m-%d")
+    sh("git fetch -q --shallow-since=%s origin main 2>/dev/null || true" % since)
+    r = sh("git log --format=%%cI --diff-filter=AM -- %s" % f, capture=True)
+    times = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
+    try:
+        return datetime.fromisoformat(times[-1]).astimezone(BKK) if times else None   # 가장 처음 올린 시각(마감 전에 올리고 고친 것은 인정)
+    except Exception:
+        return None
 
 
 def make_base_add(eid):
@@ -266,7 +292,16 @@ def make_base_add(eid):
                 cand.setdefault(x.get("url"), x)
     except Exception:
         pass
-    res = grok_add.load(eid, base_doc.get("picks") or [], E.get("grok_add") or {}, cand=cand)
+    conf = dict(E.get("grok_add") or {})
+    co = (conf.get("cutoff") or {}).get(eid[11:])   # {"am": [7, 5], …} = 그 채널 발행 예약 시각
+    if co:
+        conf["_cutoff"] = datetime.strptime(eid[:10], "%Y-%m-%d").replace(hour=int(co[0]), minute=int(co[1]), tzinfo=BKK)
+        conf["_submitted"] = grok_file_time(eid)
+    try:
+        res = grok_add.load(eid, base_doc.get("picks") or [], conf, cand=cand)
+    except Exception as ex:   # 선택 입력(그록 파일)이 이상해도 판은 코드 목록으로 계속
+        log("그록 추가 읽기 실패(%s) — 코드 목록만" % str(ex)[:80])
+        res = dict(found=True, adds=[], boost_urls=[], promote=[], dropped=[dict(url="", why="읽기 실패: %s" % str(ex)[:80])], big_event="")
     doc = grok_add.merge(base_doc, res, target)
     SEL.update(path=grok_add.path_label(res), base=len(base_doc.get("picks") or []), adds=len(res["adds"]), boost=doc["grok_add"]["boost"],
                big_event=res["big_event"], grok_file=res["found"], dropped=res["dropped"][:10], select=target)

@@ -30,6 +30,7 @@ EN_RE = re.compile(r"(?<![\d.,])(%s)\s*-?\s*(trillion|billion|million|thousand|b
 KO_SRC_RE = re.compile(r"(?<![\d,.])((?:\d[\d,]*(?:\.\d+)?\s*[조억만]\s*)+(?:\d[\d,]*(?:\.\d+)?)?)")   # 한국어 원문(한국 매체) '5억', '1천억'은 드묾
 VI_RE = re.compile(r"(?<![\d.,])(%s)\s*(nghìn tỷ|nghìn tỉ|ngàn tỷ|tỷ|tỉ|triệu|nghìn|ngàn)?" % _N, re.I)
 EN_MUL = {"trillion": 1e12, "tn": 1e12, "billion": 1e9, "bn": 1e9, "million": 1e6, "mn": 1e6, "m": 1e6, "thousand": 1e3, "k": 1e3}
+RANGE_RE = re.compile(r"(?<![\d.,])(%s)\s*(?:-|–|~|ถึง|to|đến|tới)\s*(%s)\s*(ล้านล้าน|แสนล้าน|หมื่นล้าน|พันล้าน|ร้อยล้าน|สิบล้าน|ล้าน|แสน|หมื่น|พัน|ลบ\.|ล\.|trillion|billion|million|bn|nghìn tỷ|tỷ|tỉ|triệu)" % (_N, _N), re.I)
 VI_MUL = {"nghìn tỷ": 1e12, "nghìn tỉ": 1e12, "ngàn tỷ": 1e12, "tỷ": 1e9, "tỉ": 1e9, "triệu": 1e6, "nghìn": 1e3, "ngàn": 1e3}
 
 
@@ -79,6 +80,13 @@ def source_amounts(text, lang="th"):
         v = _ko_val(m.group(1))
         if v:
             out.append((v, True))
+    # 범위의 앞 숫자에도 뒤 단위를 붙인다: '100-1,000 ล้านบาท' → 100 ล้าน 도 원문 값(코덱스 리뷰 2026-10-30)
+    for m in RANGE_RE.finditer(t):
+        a, unit = m.group(1), m.group(3).strip().lower()
+        mul = dict(TH_UNITS).get(unit) or EN_MUL.get(unit) or VI_MUL.get(unit) or {"ล.": 1e6, "ลบ.": 1e6}.get(unit)
+        v = _num(a, vi=unit in VI_MUL)
+        if v is not None and mul:
+            out.append((v * mul, True))
     return out
 
 
@@ -179,7 +187,7 @@ TH_PROVINCES = [
     ("พิษณุโลก", ["Phitsanulok"], ["핏사눌록"], ["彭世洛"], []),
     ("เพชรบุรี", ["Phetchaburi"], ["펫차부리", "펫부리"], ["佛丕"], ["ชะอำ", "Cha-am", "Cha Am"]),
     ("เพชรบูรณ์", ["Phetchabun"], ["펫차분"], ["碧差汶"], []),
-    ("แพร่", ["Phrae"], ["프래"], ["帕府"], []),
+    ("แพร่", ["Phrae"], ["프래주", "프래 주"], ["帕府"], []),
     ("ภูเก็ต", ["Phuket"], ["푸껫", "푸켓"], ["普吉"], ["ป่าตอง", "Patong", "กะรน", "Karon", "กะตะ", "Kata"]),
     ("มหาสารคาม", ["Maha Sarakham"], ["마하사라캄"], ["玛哈沙拉堪"], []),
     ("มุกดาหาร", ["Mukdahan"], ["묵다한"], ["莫达汉", "穆达汉"], []),
@@ -231,20 +239,36 @@ def _shown_names():
 SHOWN_NAMES = _shown_names()
 
 
+# 지명이 아닌 보통 낱말(코덱스 리뷰: '大城市'=큰 도시 ≠ 아유타야 '大城')
+NOT_PLACE = {"大城": ("大城市", "大城镇", "大城区"), "北标": ("北标准",), "董里": (), "华富里": ()}
+HANGUL = re.compile(r"[\uAC00-\uD7A3]")
+
+
 def provinces_in(text):
-    """번역 글에 나온 주 → {index: 글에 쓰인 이름}(긴 이름부터 찾고 그 자리는 지움)."""
+    """번역 글에 나온 주 → {index: 글에 쓰인 이름}(긴 이름부터 찾고 그 자리는 지움).
+    한국어 2글자 이름은 낱말 첫머리일 때만(앞에 한글이 붙으면 다른 낱말의 일부)."""
     t, found = text or "", {}
+    for w in [x for v in NOT_PLACE.values() for x in v]:
+        t = t.replace(w, " " * len(w))
     for n, i in SHOWN_NAMES:
-        if n in t:
+        start = 0
+        while True:
+            k = t.find(n, start)
+            if k < 0:
+                break
+            if HANGUL.match(n) and len(n) <= 2 and k > 0 and HANGUL.match(t[k - 1]):
+                start = k + len(n); continue
             found.setdefault(i, n)
-            t = t.replace(n, " " * len(n))
+            t = t[:k] + " " * len(n) + t[k + len(n):]
+            start = k + len(n)
     return found
 
 
 def province_in_source(i, src):
-    th, en, _ko, _zh, al = TH_PROVINCES[i]
+    """원문에 이 주가 있나 — 태국어·영어·별칭, 그리고 한국어·중국어 원문(한국 매체·중국어 매체)이면 그 표기도."""
+    th, en, ko, zh, al = TH_PROVINCES[i]
     low = (src or "").lower()
-    if th in src:
+    if th in src or any(n in src for n in ko + zh):
         return True
     for a in en + al:
         if a and (a in src or a.lower() in low or a.replace(" ", "").lower() in low.replace(" ", "")):

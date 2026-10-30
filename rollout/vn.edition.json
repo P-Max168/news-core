@@ -48,7 +48,21 @@
    "max": 4,
    "sources": [
     "pipeline/site.json"
-   ]
+   ],
+   "cutoff": {
+    "am": [
+     6,
+     35
+    ],
+    "md": [
+     11,
+     35
+    ],
+    "pm": [
+     17,
+     35
+    ]
+   }
   },
   "_picker_rollback": "되돌리기: picker 를 cmd 로"
  },

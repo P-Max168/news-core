@@ -15,7 +15,21 @@
    "sources": [
     "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json",
     "tools/sources.zh.json"
-   ]
+   ],
+   "cutoff": {
+    "am": [
+     7,
+     45
+    ],
+    "md": [
+     12,
+     45
+    ],
+    "pm": [
+     18,
+     45
+    ]
+   }
   },
   "_picker_rollback": "되돌리기: picker 를 grok_file 로",
   "cand_sources_url": "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json"

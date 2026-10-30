@@ -44,6 +44,17 @@ def _walk_strings(x):
             yield from _walk_strings(v)
 
 
+def _publishable(x):
+    """수집처 목록에서 운영 발행이 막힌 항목(production: false · disabled)을 뺀다(코덱스 리뷰: VnExpress International 은 RSS 약관상 발행 제외)."""
+    if isinstance(x, dict):
+        if x.get("production") is False or x.get("disabled"):
+            return {}
+        return {k: _publishable(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_publishable(v) for v in x]
+    return x
+
+
 def source_domains(paths):
     """수집처 목록 파일들 → 허용 도메인 집합. 파일 안의 모든 http 주소와 'site:도메인'(Google News 검색 소스)을 모은다.
     경로가 https:// 로 시작하면 받아 온다(ZH 처럼 한국판 수집처를 같이 쓰는 채널)."""
@@ -58,7 +69,7 @@ def source_domains(paths):
         except Exception as ex:
             print("grok_add: 수집처 목록 못 읽음 %s (%s)" % (p, str(ex)[:60]), file=sys.stderr)
             continue
-        for s in _walk_strings(j):
+        for s in _walk_strings(_publishable(j)):
             for u in re.findall(r"https?://[^\s\"'<>]+", s):
                 h = norm_host(urlparse(u).netloc)
                 if h and "news.google.com" not in h:
@@ -142,7 +153,21 @@ def load(eid, base, conf=None, now=None, path=None, cand=None):
     except Exception as ex:
         res["dropped"].append(dict(url="", why="파일 형식 오류: %s" % str(ex)[:80]))
         return res
+    if not isinstance(g, dict):   # [] · null 같은 모양이면 판을 멈추지 않고 코드 목록만(코덱스 리뷰)
+        res["dropped"].append(dict(url="", why="파일 모양 오류(객체가 아님)"))
+        return res
+    g["add"] = [x for x in (g.get("add") if isinstance(g.get("add"), list) else []) if isinstance(x, (dict, str))]
+    g["boost"] = [x if isinstance(x, dict) else {"url": str(x)} for x in (g.get("boost") if isinstance(g.get("boost"), list) else [])]
     res["found"] = True
+    cutoff = conf.get("_cutoff")   # run_edition 이 판 마감(발행 예약 시각)을 넣어 줌
+    sub = conf.get("_submitted")   # 파일이 저장소에 올라온 시각(git) — 없으면 파일의 at
+    if cutoff is not None:
+        sub = sub or _pub(g.get("at"))
+        if sub is None or sub > cutoff:
+            res["dropped"].append(dict(url="", why="마감(%s) 뒤에 올라온 파일(%s) — 이번 판은 코드 목록만" % (
+                cutoff.strftime("%H:%M"), sub.strftime("%H:%M") if sub else "시각 모름")))
+            res["late"] = True
+            return res
     if str(g.get("edition") or eid) != eid:
         res["dropped"].append(dict(url="", why="edition 값이 다름(%s)" % g.get("edition")))
         return res
