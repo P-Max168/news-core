@@ -51,6 +51,20 @@ def fx_er_api():
     return out
 
 
+def fx_live(pair):
+    """판 환율 즉시 조회(2026-10-30): 'THB_KRW' → open.er-api latest/THB 의 KRW. {rate, rate_time, source, url}. 실패하면 예외.
+    시세 파일(data/ticker.json)이 오늘 갱신(07:02 BKK) 전 값일 때 gemini_edition.fx_now 가 부른다."""
+    base, quote = pair.split("_")
+    d = get_json("https://open.er-api.com/v6/latest/%s" % base)
+    if d.get("result") != "success":
+        raise ValueError("open.er-api result=%r" % d.get("result"))
+    rate = float(d["rates"][quote])
+    if not rate > 0:
+        raise ValueError("환율 값 이상: %s=%r" % (pair, rate))
+    t = datetime.fromtimestamp(int(d["time_last_update_unix"]), BKK).isoformat(timespec="seconds")
+    return dict(rate=rate, rate_time=t, source="ExchangeRate-API (open.er-api.com)", url="https://www.exchangerate-api.com/")
+
+
 def fx_frankfurter():
     d = get_json("https://api.frankfurter.app/latest?from=USD&to=THB,KRW,CNY")
     thb, krw = float(d["rates"]["THB"]), float(d["rates"]["KRW"])

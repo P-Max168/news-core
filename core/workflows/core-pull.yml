@@ -1,0 +1,68 @@
+# news-core 당겨오기 (설계서 3-2, 당겨오기·태그 고정). 사이트가 .core-version 의 태그로 news-core(공개)를 받아 공통 파일을 복사하고
+# 검사한 뒤 PR 을 만든다. 토큰 불필요(기본 GITHUB_TOKEN). 병합은 사람이(처음 2주) — 이후 검사 통과 시 자동 병합으로 바꿀 수 있음.
+name: core-pull
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "news-core 태그 (비우면 .core-version 의 값)"
+        required: false
+        default: ""
+  push:
+    branches: [main]          # 브랜치 push(전환 PR 등)에는 돌지 않게(2026-10-29 운영 VN 에서 실제로 돈 사례)
+    paths: [".core-version"]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: news-core 받기
+        id: core
+        run: |
+          V="${{ inputs.version }}"; [ -n "$V" ] || V="$(tr -d '[:space:]' < .core-version)"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          git clone -q --depth 1 --branch "$V" https://github.com/P-Max168/news-core /tmp/news-core
+      - name: 의존성(검사용)
+        run: pip install --quiet requests beautifulsoup4
+      - name: 복사·검사 (sync.py --pull)
+        id: check
+        run: |
+          set -o pipefail
+          if python3 /tmp/news-core/sync.py --pull --clone . --site "$(tr -d '[:space:]' < site/LANG)" | tee /tmp/core-pull-report.json; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "ok=0" >> "$GITHUB_OUTPUT"; fi
+      - name: 결과를 브랜치에 기록 (검사 실패여도 — 로그 대신 ops/core-pull-report.json 으로 봄)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.core.outputs.version }}"
+          git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p ops; cp /tmp/core-pull-report.json ops/core-pull-report.json 2>/dev/null || echo '{"error":"no report"}' > ops/core-pull-report.json
+          echo "$V" > .core-version
+          git checkout -q -B "core/$V"
+          git add -A
+          git diff --cached --quiet || git commit -q -m "core: $V 당겨오기 (검사 ok=${{ steps.check.outputs.ok }})"
+          git push -q -f origin "core/$V"
+          [ "${{ steps.check.outputs.ok }}" = "1" ] || { echo "::error::검사 실패 — ops/core-pull-report.json (브랜치 core/$V) 참고"; exit 1; }
+      - name: PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.core.outputs.version }}"
+          # 브랜치 core/$V 는 앞 단계에서 올라감. main 과 차이가 .core-version·보고서뿐이면 PR 생략
+          if [ "$(git diff --name-only origin/main "core/$V" | grep -v -e '^.core-version$' -e '^ops/core-pull-report.json$' | wc -l)" = "0" ]; then echo "변경 없음(이미 $V)"; exit 0; fi
+          # PR 은 REST 로. 저장소 설정 'Allow GitHub Actions to create and approve pull requests' 가 꺼져 있으면 403 → 브랜치는 올라갔으니 안내만 하고 성공 처리
+          BODY="news-core $V 공통 파일 반영. 검사 결과는 Actions 로그(sync.py). 병합 전 설계서 6장 표대로 확인."
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/pulls" -f title="core: $V" -f head="core/$V" -f base=main -f body="$BODY" --jq '.html_url'; then :
+          else
+            n=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?head=${GITHUB_REPOSITORY_OWNER}:core/$V&state=open" --jq '.[0].number' 2>/dev/null || true)
+            if [ -n "$n" ] && [ "$n" != "null" ]; then echo "이미 열린 PR #$n 갱신됨"; else
+              echo "::warning::PR 자동 생성 불가(저장소 설정 Actions→General→'Allow GitHub Actions to create and approve pull requests' 필요). 브랜치 core/$V 는 올라감 — ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...core/$V"
+            fi
+          fi

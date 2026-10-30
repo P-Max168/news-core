@@ -1,0 +1,99 @@
+# 공통 발행 워크플로 템플릿 (news-core S2, 2026-10-29). 사이트 저장소 .github/workflows/edition.yml 로 복사해 쓴다.
+# 채널마다 다른 것은 cron 줄뿐 — 판 시각·고르기·배포 방식은 site/<lang>.json "edition" 키.
+# 시작: 그록 picks push(ops/picks/*.json) → 또는 예약(대비) → 또는 Run workflow(판 id 지정).
+# 흐름·실패 처리는 전부 tools/run_edition.py (설계서 3-3). 실패하면 빨간색 + ops/edition-fail.json 커밋(Claude 비상 발행이 읽음).
+name: edition
+
+on:
+  schedule:
+    # CORE-PULL-KEEP: 아래 cron 줄은 사이트 고유 — core-pull 이 덮어쓰지 않음
+    - cron: "5 0 * * *"
+    - cron: "5 5 * * *"
+    - cron: "5 11 * * *"
+  push:
+    paths: ["ops/picks/*.json"]
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: "판 id (예: 2026-11-01-md). 비우면 지금 시각으로"
+        required: false
+        default: ""
+      dry:
+        description: "제미나이 안 부름·push 안 함(시험)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: edition
+  cancel-in-progress: false
+
+jobs:
+  edition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Asia/Bangkok
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          ref: ${{ github.ref_name }}   # 대기열 재시도가 최신 main 을 받게(이미 있는 판 중복 생성 방지)
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 의존성
+        run: |
+          pip install --quiet requests beautifulsoup4 playwright==1.55.0
+          [ -f pipeline/requirements.txt ] && pip install --quiet -r pipeline/requirements.txt || true
+      - name: 공유 카드용 브라우저(실패해도 판은 나감)
+        continue-on-error: true
+        run: python -m playwright install --with-deps chromium
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 판 발행 (고르기 → 제미나이 → 저장 → 배포 → 라이브 대조)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          SPEND_HUB_TOKEN: ${{ secrets.SPEND_HUB_TOKEN }}     # git 원장 모드일 때만. D1 원장(S1)으로 옮기면 삭제
+          GEMINI_DAILY_CAP_THB: ${{ vars.GEMINI_DAILY_CAP_THB }}  # 비우면 코드 기본 200. 시험 저장소는 30
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.GEMINI_FALLBACK_MODEL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: "false"
+          AFTER_DEPLOY_OFF: ${{ vars.AFTER_DEPLOY_OFF }}   # 1 이면 site json edition.after_deploy_cmd(예 zh1 미러) 건너뜀
+          # TNK_LIVE_CHECK 는 run_edition.py 가 site/<lang>.json edition.live_check 로 정해 deploy.sh 에 넘김(여기서 고정하지 않음, 2026-10-30)
+        run: |
+          # 저장소 변수가 비어 있으면 빈 문자열이 들어가 코드 기본값을 가림 → 빈 값은 지움
+          for v in GEMINI_MODEL GEMINI_FALLBACK_MODEL GEMINI_DAILY_CAP_THB SPEND_HUB_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID AFTER_DEPLOY_OFF; do [ -n "${!v}" ] || unset "$v"; done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tools/run_edition.py ${{ inputs.edition && format('--edition {0}', inputs.edition) || '' }} ${{ inputs.dry && '--dry' || '' }}
+      - name: 실행 결과 → news.pmaxone.com (실패해도 발행에 영향 없음)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TOKEN=$(curl -sS -m 15 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=news-hub" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          python3 - > /tmp/hub.json <<'PY'
+          import json, os, datetime
+          body = {"run": {"name": "edition", "event": os.environ.get("GITHUB_EVENT_NAME"), "status": "completed",
+                          "conclusion": os.environ["JOB_STATUS"], "url": os.environ["RUN_URL"],
+                          "at": datetime.datetime.now(datetime.timezone.utc).isoformat()}}
+          for k, f in (("last_run", "ops/last-run.json"), ("edition_fail", "ops/edition-fail.json")):
+              try: body[k] = json.load(open(f))
+              except Exception: pass
+          print(json.dumps(body))
+          PY
+          curl -sS -m 20 -X POST https://news.pmaxone.com/api/ingest -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data @/tmp/hub.json

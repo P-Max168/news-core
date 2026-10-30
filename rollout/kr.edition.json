@@ -1,0 +1,28 @@
+{
+ "edition": {
+  "picker": "grok_file",
+  "pool": 30,
+  "select": 0,
+  "claim": true,
+  "deploy": "pages",
+  "live_check": "pages",
+  "video_feed": true,
+  "candidates_from": "own"
+ },
+ "side": {
+  "cmds": [
+   "python3 tools/fetch_korea.py --standalone {force}",
+   "python3 tools/fetch_ticker.py"
+  ],
+  "files": [
+   "data/korea.json",
+   "data/korea.js",
+   "data/ticker.json",
+   "data/ticker.js"
+  ],
+  "label": "korea: 한국 주요 뉴스·시세",
+  "pip": [
+   "googlenewsdecoder"
+  ]
+ }
+}
