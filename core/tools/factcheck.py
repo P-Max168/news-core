@@ -80,6 +80,11 @@ def source_amounts(text, lang="th"):
         v = _ko_val(m.group(1))
         if v:
             out.append((v, True))
+    # 베트남식 천 단위 점 '500.000 đồng' 은 단위 없이도 500000 으로 한 번 더 읽는다(태국·영어식으로는 500 이 됨)
+    for m in re.finditer(r"(?<![\d.,])\d{1,3}(?:\.\d{3})+(?![\d,])", t):
+        v = _num(m.group(0), vi=True)
+        if v:
+            out.append((v, False))
     # 범위의 앞 숫자에도 뒤 단위를 붙인다: '100-1,000 ล้านบาท' → 100 ล้าน 도 원문 값(코덱스 리뷰 2026-10-30)
     for m in RANGE_RE.finditer(t):
         a, unit = m.group(1), m.group(3).strip().lower()
@@ -91,18 +96,41 @@ def source_amounts(text, lang="th"):
 
 
 # 번역 글의 현지 통화 금액
-KO_BAHT_RE = re.compile(r"(?<![\d,.])((?:\d[\d,]*(?:\.\d+)?\s*[조억만]\s*)*(?:\d[\d,]*(?:\.\d+)?)?)\s*바트")
-KO_DONG_RE = re.compile(r"(?<![\d,.])((?:\d[\d,]*(?:\.\d+)?\s*[조억만]\s*)*(?:\d[\d,]*(?:\.\d+)?)?)\s*동(?![네부안시북남서쪽행료생기물작맹원아])")
+_KONUM = r"\d[\d,]*(?:\.\d+)?(?:천(?:\d[\d,]*)?)?"
+KO_BAHT_RE = re.compile(r"(?<![\d,.])((?:%s\s*[조억만]\s*)*(?:%s)?)\s*바트" % (_KONUM, _KONUM))
+KO_DONG_RE = re.compile(r"(?<![\d,.])((?:%s\s*[조억만]\s*)*(?:%s)?)\s*동(?![네부안시북남서쪽행료생기물작맹원아])" % (_KONUM, _KONUM))
 ZH_BAHT_RE = re.compile(r"(?<![\d,.])(\d[\d,]*(?:\.\d+)?)\s*(万亿|亿|万)?\s*泰铢")
 
 
+def _ko_small(chunk):
+    """'1천500' → 1500, '3백' → 300, '2,500' → 2500, '1.5' → 1.5 (만·억·조 아래 한 덩어리)."""
+    chunk = chunk.replace(",", "")
+    if not re.search(r"[천백십]", chunk):
+        try:
+            return float(chunk) if chunk else 0.0
+        except ValueError:
+            return 0.0
+    total, rest = 0.0, chunk
+    for u, mul in (("천", 1000), ("백", 100), ("십", 10)):
+        m = re.match(r"(\d+(?:\.\d+)?)?%s(.*)" % u, rest)
+        if m:
+            total += float(m.group(1) or 1) * mul
+            rest = m.group(2)
+    try:
+        total += float(rest) if rest else 0
+    except ValueError:
+        pass
+    return total
+
+
 def _ko_val(s):
-    s = re.sub(r"[\s,]", "", s or "")
+    """'256억6,400만' → 25664000000, '1천500억' → 150000000000, '2.5만' → 25000."""
+    s = re.sub(r"\s", "", s or "")
     if not re.search(r"\d", s):
         return None
-    total, units = 0.0, {"조": 1e12, "억": 1e8, "만": 1e4}
-    for num, u in re.findall(r"(\d+(?:\.\d+)?)([조억만]?)", s):
-        total += float(num) * units.get(u, 1)
+    total = 0.0
+    for chunk, u in re.findall(r"([\d.,천백십]+)([조억만]?)", s):
+        total += _ko_small(chunk) * {"조": 1e12, "억": 1e8, "만": 1e4}.get(u, 1)
     return total
 
 
@@ -122,7 +150,7 @@ def shown_amounts(text, cur):
     elif cur == "VND":
         for m in KO_DONG_RE.finditer(t):
             v = _ko_val(m.group(1))
-            if v:
+            if v and v >= 1000:   # '아파트 101동'·'5동'(행정동) 은 금액 아님
                 out.append((m.group(0), v))
     return out
 
@@ -141,6 +169,9 @@ def unit_error(v, src, tol=0.05, min_big=1e6):
         r = math.log10(v / s)
         k = round(r)
         if k != 0 and abs(k) <= 8 and abs(v / s / (10 ** k) - 1) <= tol:
+            ratio = v / s if v > s else s / v
+            if any(x > 1 and abs(x - ratio) <= tol * ratio for x, _u in src):   # 원문의 다른 숫자(사람 수·대수)를 곱한 합계 = 계산(오류 아님)
+                continue
             return s
     return None
 
@@ -148,27 +179,27 @@ def unit_error(v, src, tol=0.05, min_big=1e6):
 # ---------------------------------------------------------------- 태국 77개 주
 # (태국어, [영어·로마자], [한국어], [중국어], [같은 주로 인정할 태국어/영어 별칭(도시·섬·공항)])
 TH_PROVINCES = [
-    ("กระบี่", ["Krabi"], ["끄라비", "크라비"], ["甲米"], ["ลันตา", "Lanta", "อ่าวนาง", "Ao Nang"]),
+    ("กระบี่", ["Krabi"], ["끄라비", "크라비"], ["甲米"], ["ลันตา", "Lanta", "อ่าวนาง", "Ao Nang", "พีพี", "Phi Phi", "ไร่เลย์", "Railay"]),
     ("กาญจนบุรี", ["Kanchanaburi"], ["깐짜나부리", "칸차나부리"], ["北碧"], []),
     ("กาฬสินธุ์", ["Kalasin"], ["깔라신", "칼라신"], ["加拉信"], []),
     ("กำแพงเพชร", ["Kamphaeng Phet"], ["깜팽펫", "캄팽펫"], ["甘烹碧"], []),
     ("ขอนแก่น", ["Khon Kaen"], ["콘깬", "컨깬", "콘캔"], ["孔敬"], []),
     ("จันทบุรี", ["Chanthaburi"], ["짠타부리", "찬타부리"], ["尖竹汶"], []),
     ("ฉะเชิงเทรา", ["Chachoengsao"], ["차층사오"], ["北柳"], []),
-    ("ชลบุรี", ["Chonburi", "Chon Buri"], ["촌부리"], ["春武里"], ["พัทยา", "Pattaya", "ศรีราชา", "Si Racha", "Sriracha", "บางแสน", "Bang Saen", "สัตหีบ", "Sattahip", "บางละมุง", "Bang Lamung", "แหลมฉบัง", "Laem Chabang", "จอมเทียน", "Jomtien", "นาเกลือ", "Naklua", "พานทอง", "บ่อวิน", "บ้านบึง", "อีอีซี", "EEC"]),
+    ("ชลบุรี", ["Chonburi", "Chon Buri"], ["촌부리"], ["春武里"], ["พัทยา", "Pattaya", "เกาะล้าน", "Koh Larn", "Ko Lan", "ศรีราชา", "Si Racha", "Sriracha", "บางแสน", "Bang Saen", "สัตหีบ", "Sattahip", "บางละมุง", "Bang Lamung", "แหลมฉบัง", "Laem Chabang", "จอมเทียน", "Jomtien", "นาเกลือ", "Naklua", "พานทอง", "บ่อวิน", "บ้านบึง", "อีอีซี", "EEC"]),
     ("ชัยนาท", ["Chai Nat", "Chainat"], ["차이낫"], ["猜纳"], []),
     ("ชัยภูมิ", ["Chaiyaphum"], ["차이야품"], ["猜也蓬"], []),
     ("ชุมพร", ["Chumphon"], ["춤폰", "촘폰"], ["春蓬"], ["หลังสวน", "Lang Suan"]),
     ("เชียงราย", ["Chiang Rai"], ["치앙라이"], ["清莱"], ["แม่สาย", "Mae Sai"]),
-    ("เชียงใหม่", ["Chiang Mai"], ["치앙마이"], ["清迈"], []),
+    ("เชียงใหม่", ["Chiang Mai"], ["치앙마이"], ["清迈"], ["ดอยอินทนนท์", "Doi Inthanon", "ดอยสุเทพ", "Doi Suthep"]),
     ("ตรัง", ["Trang"], ["뜨랑", "트랑"], ["董里"], []),
-    ("ตราด", ["Trat"], ["뜨랏", "트랏"], ["达叻"], ["เกาะช้าง", "Koh Chang", "Ko Chang"]),
+    ("ตราด", ["Trat"], ["뜨랏", "트랏"], ["达叻"], ["เกาะช้าง", "Koh Chang", "Ko Chang", "เกาะกูด", "Koh Kood", "Koh Kut"]),
     ("ตาก", ["Tak"], [], ["达府", "来兴"], ["แม่สอด", "Mae Sot"]),
     ("นครนายก", ["Nakhon Nayok"], ["나콘나욕"], ["那空那育"], []),
     ("นครปฐม", ["Nakhon Pathom"], ["나콘빠톰", "나콘파톰"], ["佛统"], []),
     ("นครพนม", ["Nakhon Phanom"], ["나콘파놈"], ["那空拍侬", "那空帕农"], []),
-    ("นครราชสีมา", ["Nakhon Ratchasima", "Korat"], ["나콘랏차시마", "나콘라차시마", "코랏"], ["呵叻", "那空叻差是玛"], ["โคราช"]),
-    ("นครศรีธรรมราช", ["Nakhon Si Thammarat"], ["나콘시탐마랏"], ["洛坤", "那空是贪玛叻"], []),
+    ("นครราชสีมา", ["Nakhon Ratchasima", "Korat", "Khorat"], ["나콘랏차시마", "나콘라차시마", "코랏"], ["呵叻", "那空叻差是玛"], ["โคราช", "เขาใหญ่", "Khao Yai", "ปากช่อง", "Pak Chong"]),
+    ("นครศรีธรรมราช", ["Nakhon Si Thammarat"], ["나콘시탐마랏"], ["洛坤", "那空是贪玛叻"], ["นครศรีฯ"]),
     ("นครสวรรค์", ["Nakhon Sawan"], ["나콘사완"], ["北榄坡", "那空沙旺"], []),
     ("นนทบุรี", ["Nonthaburi"], ["논타부리"], ["暖武里"], []),
     ("นราธิวาส", ["Narathiwat"], ["나라티왓"], ["陶公", "那拉提瓦"], []),
@@ -176,12 +207,12 @@ TH_PROVINCES = [
     ("บึงกาฬ", ["Bueng Kan"], ["븡깐", "붕깐"], ["汶干"], []),
     ("บุรีรัมย์", ["Buriram", "Buri Ram"], ["부리람"], ["武里南"], []),
     ("ปทุมธานี", ["Pathum Thani"], ["빠툼타니", "파툼타니"], ["巴吞他尼"], ["รังสิต", "Rangsit"]),
-    ("ประจวบคีรีขันธ์", ["Prachuap Khiri Khan", "Prachuap"], ["쁘라추압", "프라추압"], ["巴蜀"], ["หัวหิน", "Hua Hin"]),
+    ("ประจวบคีรีขันธ์", ["Prachuap Khiri Khan", "Prachuap"], ["쁘라추압", "프라추압"], ["巴蜀府"], ["หัวหิน", "Hua Hin", "ประจวบฯ", "ปราณบุรี", "Pranburi"]),
     ("ปราจีนบุรี", ["Prachinburi", "Prachin Buri"], ["쁘라찐부리", "프라친부리"], ["巴真"], []),
     ("ปัตตานี", ["Pattani"], ["빳따니", "파타니"], ["北大年"], []),
     ("พระนครศรีอยุธยา", ["Ayutthaya", "Ayuthaya"], ["아유타야", "아유따야"], ["大城"], ["อยุธยา"]),
     ("พะเยา", ["Phayao"], ["파야오"], ["帕尧"], []),
-    ("พังงา", ["Phang Nga", "Phangnga"], ["팡아", "팡응아"], ["攀牙"], ["เขาหลัก", "Khao Lak"]),
+    ("พังงา", ["Phang Nga", "Phangnga"], ["팡아", "팡응아"], ["攀牙"], ["เขาหลัก", "Khao Lak", "สิมิลัน", "Similan"]),
     ("พัทลุง", ["Phatthalung"], ["팟탈룽"], ["博他仑", "博达伦"], []),
     ("พิจิตร", ["Phichit"], ["피찟", "피칫"], ["披集"], []),
     ("พิษณุโลก", ["Phitsanulok"], ["핏사눌록"], ["彭世洛"], []),
@@ -205,11 +236,11 @@ TH_PROVINCES = [
     ("ศรีสะเกษ", ["Sisaket", "Si Sa Ket"], ["시사껫", "시사켓"], ["四色菊"], []),
     ("สกลนคร", ["Sakon Nakhon"], ["사꼰나콘", "사콘나콘"], ["色军"], []),
     ("สงขลา", ["Songkhla"], ["송클라", "쏭크라"], ["宋卡"], ["หาดใหญ่", "Hat Yai", "Hatyai", "สะเดา", "Sadao"]),
-    ("สตูล", ["Satun"], ["사뚠", "사툰"], ["沙敦"], []),
-    ("สมุทรปราการ", ["Samut Prakan"], ["사뭇쁘라깐", "사뭇프라칸"], ["北榄"], ["สุวรรณภูมิ", "Suvarnabhumi", "บางพลี", "Bang Phli"]),
+    ("สตูล", ["Satun"], ["사뚠", "사툰"], ["沙敦"], ["หลีเป๊ะ", "Lipe"]),
+    ("สมุทรปราการ", ["Samut Prakan", "Samut Prakarn"], ["사뭇쁘라깐", "사뭇프라칸"], ["北榄"], ["สุวรรณภูมิ", "Suvarnabhumi", "บางพลี", "Bang Phli"]),
     ("สมุทรสงคราม", ["Samut Songkhram"], ["사뭇송크람"], ["夜功"], []),
     ("สมุทรสาคร", ["Samut Sakhon"], ["사뭇사콘"], ["龙仔厝"], ["มหาชัย", "Mahachai"]),
-    ("สระแก้ว", ["Sa Kaeo"], ["사깨우", "사깨오"], ["沙缴"], ["อรัญประเทศ", "Aranyaprathet"]),
+    ("สระแก้ว", ["Sa Kaeo", "Sa Kaew"], ["사깨우", "사깨오"], ["沙缴"], ["อรัญประเทศ", "Aranyaprathet"]),
     ("สระบุรี", ["Saraburi"], ["사라부리"], ["北标"], []),
     ("สิงห์บุรี", ["Sing Buri"], ["싱부리"], ["信武里"], []),
     ("สุโขทัย", ["Sukhothai"], ["수코타이"], ["素可泰"], []),
@@ -220,10 +251,10 @@ TH_PROVINCES = [
     ("หนองบัวลำภู", ["Nong Bua Lamphu"], ["농부아람푸"], ["廊磨南蒲"], []),
     ("อ่างทอง", ["Ang Thong"], ["앙통"], ["红统"], []),
     ("อำนาจเจริญ", ["Amnat Charoen"], ["암낫짜른", "암낫차른"], ["安纳乍伦"], []),
-    ("อุดรธานี", ["Udon Thani", "Udon"], ["우돈타니", "우돈"], ["乌隆他尼", "乌隆"], []),
+    ("อุดรธานี", ["Udon Thani", "Udon"], ["우돈타니", "우돈"], ["乌隆他尼", "乌隆"], ["อุดรฯ"]),
     ("อุตรดิตถ์", ["Uttaradit"], ["웃따라딧", "우타라딧"], ["程逸"], []),
     ("อุทัยธานี", ["Uthai Thani"], ["우타이타니"], ["乌泰他尼"], []),
-    ("อุบลราชธานี", ["Ubon Ratchathani", "Ubon"], ["우본랏차타니", "우본라차타니", "우본"], ["乌汶叻差他尼", "乌汶"], []),
+    ("อุบลราชธานี", ["Ubon Ratchathani", "Ubon"], ["우본랏차타니", "우본라차타니", "우본"], ["乌汶叻差他尼", "乌汶"], ["อุบลฯ"]),
 ]
 
 
@@ -240,7 +271,9 @@ SHOWN_NAMES = _shown_names()
 
 
 # 지명이 아닌 보통 낱말(코덱스 리뷰: '大城市'=큰 도시 ≠ 아유타야 '大城')
-NOT_PLACE = {"大城": ("大城市", "大城镇", "大城区"), "北标": ("北标准",), "董里": (), "华富里": ()}
+NOT_PLACE = {"大城": ("大城市", "大城镇", "大城区"), "北标": ("北标准",), "也拉": ("也拉动", "也拉高", "也拉近", "也拉开", "也拉长", "也拉低", "也拉升", "也拉大", "也拉回", "也拉上"),
+             "러이": ("러이끄라통", "러이 끄라통", "러이크라통", "로이끄라통")}
+KO_SUFFIX_OK = set("주도시군에의은는이가을를로서와과까부지만도")   # 한국어 2글자 지명 바로 뒤에 와도 되는 글자(조사·주·도)
 HANGUL = re.compile(r"[\uAC00-\uD7A3]")
 
 
@@ -256,7 +289,8 @@ def provinces_in(text):
             k = t.find(n, start)
             if k < 0:
                 break
-            if HANGUL.match(n) and len(n) <= 2 and k > 0 and HANGUL.match(t[k - 1]):
+            nxt = t[k + len(n):k + len(n) + 1]
+            if HANGUL.match(n) and len(n) <= 2 and ((k > 0 and HANGUL.match(t[k - 1])) or (nxt and HANGUL.match(nxt) and nxt not in KO_SUFFIX_OK)):
                 start = k + len(n); continue
             found.setdefault(i, n)
             t = t[:k] + " " * len(n) + t[k + len(n):]
@@ -270,8 +304,9 @@ def province_in_source(i, src):
     low = (src or "").lower()
     if th in src or any(n in src for n in ko + zh):
         return True
+    flat = re.sub(r"[\s\-]", "", low)
     for a in en + al:
-        if a and (a in src or a.lower() in low or a.replace(" ", "").lower() in low.replace(" ", "")):
+        if a and (a in src or a.lower() in low or re.sub(r"[\s\-]", "", a.lower()) in flat):
             return True
     return False
 
@@ -306,10 +341,15 @@ def check_story(s, body, cur="THB", places=True, memo="", min_body=300):
             if ("amount", msg) not in probs:
                 probs.append(("amount", msg))
     if places and full:
+        src_has = [j for j in range(len(TH_PROVINCES)) if province_in_source(j, src_all)]
         for i, name in sorted(provinces_in(txt).items()):
             if not province_in_source(i, src_all):
                 th, en, _ko, _zh, _ = TH_PROVINCES[i]
-                probs.append(("place", "지명 오류: 번역에 '%s'(%s, %s) 가 나오는데 원문에는 이 주가 없음 — 원문 지명을 그대로 옮길 것" % (name, en[0], th)))
+                if src_has:   # 원문엔 다른 주가 있는데 번역은 이 주 = 지명 바꿔치기(춤폰→촌부리) → 실패
+                    probs.append(("place", "지명 오류: 번역에 '%s'(%s, %s) 가 나오는데 원문에는 이 주가 없음(원문: %s) — 원문 지명을 그대로 옮길 것"
+                                  % (name, en[0], th, ", ".join(TH_PROVINCES[j][1][0] for j in src_has[:3]))))
+                else:         # 원문에 주 이름이 아예 없음(섬·국립공원·축제 등) → 참고만(근거 없이 빼지 않기)
+                    probs.append(("warn", "지명 참고: 번역에 '%s'(%s) — 원문에 주 이름 없음" % (name, en[0])))
     return probs
 
 

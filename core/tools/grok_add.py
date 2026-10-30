@@ -89,7 +89,7 @@ def host_ok(url, doms):
 
 
 def _norm_title(t):
-    return re.sub(r"\W+", "", (t or "").lower())
+    return re.sub(r"\W+", "", str(t or "").lower())
 
 
 def _similar(a, b, r=0.85):
@@ -247,7 +247,10 @@ def merge(base_doc, res, select):
     base = list(base_doc.get("picks") or [])
     boost = [b for u in res["boost_urls"] for b in base if b.get("url") == u] + list(res.get("promote") or [])
     rest = [b for b in base if b.get("url") not in set(res["boost_urls"])]
-    picks = res["adds"] + boost + rest
+    picks, seen = [], set()
+    for p in res["adds"] + boost + rest:   # 같은 주소 두 번 넘기지 않기
+        if p.get("url") not in seen:
+            seen.add(p.get("url")); picks.append(p)
     doc = dict(base_doc, picks=picks, picker="code", select=int(select or base_doc.get("select") or 20))
     doc["grok_add"] = dict(adds=len(res["adds"]), boost=len(boost), dropped=res["dropped"], big_event=res["big_event"], found=res["found"])
     return doc

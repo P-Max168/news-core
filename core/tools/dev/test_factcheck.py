@@ -57,6 +57,17 @@ ok(not probs(dict(id="r3", title_th="청마이 축제", headline="清迈水灯�
 ok(not probs(dict(id="r4", title_th="푸켓 폭우", headline="푸켓 폭우로 도로 침수"), "푸켓에서 폭우가 쏟아져 도로가 잠겼다. " * 20), "한국어 원문에 '푸켓' 있으면 통과")
 ok(not probs(dict(id="r5", title_th="ข่าว", headline="프래그런스 브랜드 출시"), "ร้านค้าเปิดตัวน้ำหอม " * 30), "'프래그런스'를 프래주로 보지 않음")
 
+# ---- 독립 검토 반영(2026-10-30 밤)
+ok(not probs(dict(id="q1", title_th="ลอยกระทงพัทยา", headline="파타야 러이끄라통 11월 24일"), "งานลอยกระทงที่พัทยา " * 30), "러이끄라통(축제)을 러이주로 보지 않음")
+ok(not probs(dict(id="q2", title_th="x", headline="今年经济也拉动消费"), "เศรษฐกิจ " * 60), "'也拉动'을 얄라로 보지 않음")
+ok(not probs(dict(id="q3", title_th="phạt 500.000 đồng, tối đa 5 triệu đồng", headline="50만 동 벌금, 최대 500만 동"), cur="VND"), "VN '500.000 đồng'(점 천 단위) 통과")
+ok(not probs(dict(id="q4", title_th="คนละ 10,000 บาท 1 ล้านคน", headline="총 100억 바트 지원")), "원문 숫자를 곱한 합계(계산) 통과")
+ok(not probs(dict(id="q5", title_th="x", headline="아파트 101동 화재"), cur="VND"), "행정동·아파트 동 번호는 금액 아님")
+ok(not probs(dict(id="q6", title_th="เกาะพีพี", headline="끄라비 피피섬 관광객 증가"), "นักท่องเที่ยวเกาะพีพีเพิ่มขึ้น " * 30), "섬 별칭(피피→끄라비) 통과")
+ok(not probs(dict(id="q7", title_th="x", headline="샤뭇쁘라깐 공항 근처", region="사뭇쁘라깐"), "flights near Samut Prakarn and Suvarnabhumi " * 20), "영어 철자 변형(Samut Prakarn) 통과")
+ok("place" not in probs(dict(id="q8", title_th="x", headline="푸켓 관광"), "นักท่องเที่ยวเพิ่มขึ้นมาก " * 30), "원문에 주가 없으면 지명은 참고만(빼지 않음)")
+ok(f._ko_val("1천500억") == 1.5e11, "한국어 '1천500억' 읽기")
+
 # ---- 위안 이중 환산 제거(gemini_edition._fix_text)
 sys.argv = [sys.argv[0]]
 try:

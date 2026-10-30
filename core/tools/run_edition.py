@@ -176,11 +176,14 @@ def decide_edition(a, now):
         if (ROOT / "data" / (a.edition + ".json")).exists():   # 발행된 판은 절대 다시 만들지 않음(덮어쓰기 금지) — 배포 확인만
             return None, "이미 있음: %s — 지정해도 다시 만들지 않음|REDEPLOY:%s" % (a.edition, a.edition)
         return a.edition, ""
+    if os.environ.get("GITHUB_EVENT_NAME") == "push" and E["picker"] == "base_add":
+        # base_add: 판은 발행 예약 시각에 만든다. 옛 습관으로 picks 를 push 해도 판을 일찍 만들면 그록 추가가 빠짐
+        return None, "base_add 채널은 picks push 로 판을 만들지 않음(발행 예약 시각에 만듦)"
     if os.environ.get("GITHUB_EVENT_NAME") == "push":
         pid = pushed_picks_id()
         if pid:
             if (ROOT / "data" / (pid + ".json")).exists():
-                return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(다시 만들려면 Run workflow 로 판 지정)" % pid
+                return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(발행된 판은 덮어쓰지 않음)" % pid
             return pid, ""
     s = a.slot or slot_for(now)
     eid = "%s-%s" % (now.strftime("%Y-%m-%d"), s) if s else ""
@@ -413,7 +416,10 @@ def main():
     if not a.dry and claim("claim", eid):
         log("담당 표시 HOLD — 다른 담당이 이미 맡음"); print("skip=1"); return 0
 
-    picks = make_picks(eid)
+    try:
+        picks = make_picks(eid)
+    except Exception as ex:   # 고르기 단계 예외도 정상 실패 경로로(실패 기록·담당 해제) — 담당 표시가 남아 대비 실행이 막히지 않게
+        log("고르기 예외:", type(ex).__name__, str(ex)[:200]); picks = None
     if not picks:
         write_fail(eid, "no_picks")
         if not a.dry:

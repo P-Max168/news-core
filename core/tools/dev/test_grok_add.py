@@ -109,5 +109,8 @@ ok(not r["adds"] and r.get("late"), "마감 뒤 올라온 파일은 안 씀")
 r = g.load("2026-10-31-pm", BASE, dict(CONF, _cutoff=cut, _submitted=datetime(2026, 10, 31, 17, 55, tzinfo=BKK)), now=NOW, path=f)
 ok(len(r["adds"]) == 1, "마감 전 파일은 씀")
 
+r = run(dict(edition="2026-10-31-pm", add=[dict(url="https://www.khaosod.co.th/t1", source="K", title=12345, published=P)]), "num.json")
+ok(isinstance(r, dict), "숫자 title 도 예외 없음")
+
 print("\n결과:", "모두 통과" if not FAIL else "실패 %d: %s" % (len(FAIL), FAIL))
 sys.exit(1 if FAIL else 0)
