@@ -56,9 +56,14 @@ def edition_page(data, meta, title, desc, og_block, emoji=None, label=None):
     target = "../../?ed=" + eid
     emoji = emoji or {}
     arts = []
+    try:   # 매체 이름의 태국 글자 제거(2026-10-30) — 이미 발행된 판(also.source 에 원어 이름)도 e/ 페이지가 만들어지게
+        import newslib
+        _lab = newslib.source_label
+    except Exception:
+        _lab = lambda n, fb="": str(n or fb)
     for s in data.get("stories", []):
-        src = '<a href="%s" rel="nofollow noopener" target="_blank">%s</a>' % (e(s["url"]), e(s.get("source", "원문"))) if s.get("url") else e(s.get("source", ""))
-        also = "".join(' · <a href="%s" rel="nofollow noopener" target="_blank">%s</a>' % (e(a["url"]), e(a.get("source", "")))
+        src = '<a href="%s" rel="nofollow noopener" target="_blank">%s</a>' % (e(s["url"]), e(_lab(s.get("source"), "원문") or "원문")) if s.get("url") else e(_lab(s.get("source")))
+        also = "".join(' · <a href="%s" rel="nofollow noopener" target="_blank">%s</a>' % (e(a["url"]), e(_lab(a.get("source"))))
                        for a in (s.get("also") or []) if a.get("url"))
         ctx = '<p class="ctx">%s</p>' % e(s["context"]) if s.get("context") else ""
         region = '<span class="rg">%s</span> ' % e(s["region"]) if s.get("region") else ""

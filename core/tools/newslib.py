@@ -351,6 +351,19 @@ def money_ok(text):
 HANGUL_RE = re.compile(r"[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]")
 
 
+def source_label(name, fallback=""):
+    """매체 이름 표시용(2026-10-30). 화면에 태국 글자가 금지된 언어판이면 태국어 부분(괄호 안 원어 이름 등)을 뺀다.
+    'Bangkok Biz News(กรุงเทพธุรกิจ)' → 'Bangkok Biz News', 전부 태국어면 fallback.
+    (also[].source 에 태국 글자가 남아 판 미리보기(e/<판>/)를 못 만들고 404 가 나던 것 — thai_check 는 source·related.source 만 봤음)"""
+    s = str(name or "").strip()
+    if not thai_bad(s):
+        return s
+    s = re.sub(r"[(\[（［][^)\]）］]*[\u0E00-\u0E7F][^)\]）］]*[)\]）］]", "", s)   # 괄호 안에 태국 글자 → 괄호째
+    s = THAI_RE.sub("", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" -–·/|,:")
+    return s or fallback
+
+
 def thai_bad(text):
     """한 문장에 태국 글자가 있고, 이 언어판이 태국 글자를 막는지(태국어판은 항상 False)."""
     return bool(siteconf.forbids("thai", SITE) and THAI_RE.search(text or ""))
