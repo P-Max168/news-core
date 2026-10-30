@@ -192,6 +192,11 @@ def decide_edition(a, now):
 def make_picks(eid):
     """picks 파일 경로를 돌려준다. 없으면 None."""
     pf = OPS / "picks" / (eid + ".json")
+    if E["picker"] in ("grok_file", "code"):
+        try:   # 후보 목록은 그록 picks 일 때도 받는다 — gemini_edition 이 picks 에 빠진 제목·매체·시각을 채우는 데 씀(옛 yml 과 같음). 실패해도 계속
+            fetch_candidates()
+        except Exception as ex:
+            log("후보 목록 못 받음(계속):", ex)
     if E["picker"] in ("grok_file", "code") and pf.exists():
         return str(pf)
     if E["picker"] == "cmd" and E["picker_cmd"]:
@@ -201,7 +206,6 @@ def make_picks(eid):
             return None
         last = [l.strip() for l in r.stdout.splitlines() if l.strip()]
         return last[-1] if last and os.path.exists(last[-1]) else (str(pf) if pf.exists() else None)
-    fetch_candidates()
     r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(E["pool"]), "--select", str(E["select"] or 20)])
     return str(pf) if r.returncode == 0 and pf.exists() else None
 
