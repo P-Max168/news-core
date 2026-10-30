@@ -67,10 +67,11 @@ try:
     _orig = nl.write_edition
     nl.write_edition = lambda d, **k: saved.setdefault("n", len(d["stories"]))
     items = [dict(url="https://a/%d" % i, title="ข่าว %d" % i, memo="", text="ข้อความ " * 80) for i in range(5)]
-    items[2]["title"] = "ดึงลงทุน 2.5 หมื่น ล."
+    vnd = ge.SITE.get("currency", {}).get("check") == "vnd_check"   # 채널 통화에 맞춰(VN = 동)
+    items[2]["title"] = "đầu tư 2,5 tỷ đồng" if vnd else "ดึงลงทุน 2.5 หมื่น ล."
     stories = [dict(id="s%d" % i, url="https://a/%d" % i, title_th=items[i]["title"], topic="poleco", region="", headline="뉴스 %d" % i,
                     summary=["내용"]) for i in range(5)]
-    stories[2]["headline"] = "투자 2.5조 바트 유치"
+    stories[2]["headline"] = "투자 2,500만 동 유치" if vnd else "투자 2.5조 바트 유치"
     data = dict(stories=stories, briefing=[], highlights=["s0"])
     okk = ge.save_with_drop(data, retranslate_fn=lambda d, sid, defect_note="": False, extra_check=__import__("factcheck").make_checker(items, ge.SITE))
     ok(okk and saved.get("n") == 4 and [s["id"] for s in data["stories"]] == ["s0", "s1", "s3", "s4"], "저장 단계: 단위 오류 기사 1건만 격리, 4건 발행")
