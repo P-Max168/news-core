@@ -1,11 +1,29 @@
 {
- "picker": "grok_file",
- "pool": 30,
- "select": 0,
- "claim": true,
- "deploy": "pages",
- "live_check": "pages",
- "video_feed": false,
- "candidates_from": "kr",
- "after_deploy_cmd": "python3 ops/zh1_mirror.py run {eid} --backfill 3 && git add zh1 ops/gemini-usage.jsonl && (git diff --cached --quiet || git commit -q -m 'zh1: {eid} 한국어 검수 미러') && git pull --rebase --autostash -q origin main && git push -q origin HEAD:main"
+ "edition": {
+  "picker": "grok_file",
+  "pool": 30,
+  "select": 0,
+  "claim": true,
+  "deploy": "pages",
+  "live_check": "pages",
+  "video_feed": false,
+  "candidates_from": "kr",
+  "after_deploy_cmd": "python3 ops/zh1_mirror.py run {eid} --backfill 3 && git add zh1 ops/gemini-usage.jsonl && (git diff --cached --quiet || git commit -q -m 'zh1: {eid} 한국어 검수 미러') && git pull --rebase --autostash -q origin main && git push -q origin HEAD:main"
+ },
+ "side": {
+  "cmds": [
+   "python3 tools/fetch_china.py --standalone {force}",
+   "python3 tools/fetch_ticker.py"
+  ],
+  "files": [
+   "data/china.json",
+   "data/china.js",
+   "data/ticker.json",
+   "data/ticker.js"
+  ],
+  "label": "china: 中国要闻·시세",
+  "pip": [
+   "googlenewsdecoder"
+  ]
+ }
 }

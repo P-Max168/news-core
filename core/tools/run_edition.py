@@ -344,7 +344,9 @@ def main():
         if not ok:
             write_fail(eid, "live_mismatch", stage="verify", sha=sha, local=local_n); push_fail_record(eid)
 
-    if E["after_deploy_cmd"]:   # 예: zh1 한국어 검수 미러 — 판은 이미 나갔으므로 실패해도 경고만
+    if E["after_deploy_cmd"] and os.environ.get("AFTER_DEPLOY_OFF") == "1":   # 저장소 변수 AFTER_DEPLOY_OFF=1 (옛 ZH1_MIRROR=off)
+        log("after_deploy_cmd 꺼짐(AFTER_DEPLOY_OFF=1)")
+    elif E["after_deploy_cmd"]:   # 예: zh1 한국어 검수 미러 — 판은 이미 나갔으므로 실패해도 경고만
         if sh(E["after_deploy_cmd"].replace("{eid}", eid), env=env).returncode:
             log("경고: after_deploy_cmd 실패(판은 이미 배포됨)")
 

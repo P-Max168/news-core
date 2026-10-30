@@ -1,46 +1,60 @@
 {
- "picker": "cmd",
- "picker_cmd": "python3 pipeline/vn_picks.py {eid}",
- "pre_cmd": "python3 pipeline/refresh_side.py",
- "pool": 40,
- "select": 25,
- "claim": true,
- "deploy": "cloudflare",
- "deploy_cmd": "python3 pipeline/build_dist.py && npx --yes wrangler@4.152.0 deploy --config wrangler.json",
- "live_check": "curl",
- "video_feed": true,
- "candidates_from": "own",
- "metrics_line": true,
- "floor_minutes": {
-  "am": [
-   6,
-   30
+ "edition": {
+  "picker": "cmd",
+  "picker_cmd": "python3 pipeline/vn_picks.py {eid}",
+  "pool": 40,
+  "select": 25,
+  "claim": true,
+  "deploy": "cloudflare",
+  "deploy_cmd": "python3 pipeline/build_dist.py && npx --yes wrangler@4.152.0 deploy --config wrangler.json",
+  "live_check": "curl",
+  "video_feed": true,
+  "candidates_from": "own",
+  "metrics_line": true,
+  "floor_minutes": {
+   "am": [
+    6,
+    30
+   ],
+   "md": [
+    11,
+    30
+   ],
+   "pm": [
+    17,
+    30
+   ]
+  },
+  "stale_slots": [
+   [
+    "am",
+    7,
+    30
+   ],
+   [
+    "md",
+    12,
+    30
+   ],
+   [
+    "pm",
+    18,
+    30
+   ]
   ],
-  "md": [
-   11,
-   30
-  ],
-  "pm": [
-   17,
-   30
-  ]
+  "publisher": "grok"
  },
- "stale_slots": [
-  [
-   "am",
-   7,
-   30
+ "side": {
+  "cmds": [
+   "python3 pipeline/refresh_side.py"
   ],
-  [
-   "md",
-   12,
-   30
+  "files": [
+   "data/korea.json",
+   "data/korea.js",
+   "data/ticker.json",
+   "data/ticker.js"
   ],
-  [
-   "pm",
-   18,
-   30
-  ]
- ],
- "publisher": "grok"
+  "label": "vn: 시세·한국 뉴스",
+  "pip": []
+ }
 }
