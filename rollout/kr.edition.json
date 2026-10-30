@@ -1,13 +1,21 @@
 {
  "edition": {
-  "picker": "grok_file",
-  "pool": 30,
-  "select": 0,
+  "picker": "base_add",
+  "pool": 40,
+  "select": 25,
   "claim": true,
   "deploy": "pages",
   "live_check": "pages",
   "video_feed": true,
-  "candidates_from": "own"
+  "candidates_from": "own",
+  "cand_max_age_min": 60,
+  "grok_add": {
+   "max": 4,
+   "sources": [
+    "tools/sources.json"
+   ]
+  },
+  "_picker_rollback": "되돌리기: picker 를 grok_file 로"
  },
  "side": {
   "cmds": [

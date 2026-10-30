@@ -1,14 +1,24 @@
 {
  "edition": {
-  "picker": "grok_file",
-  "pool": 30,
-  "select": 0,
+  "picker": "base_add",
+  "pool": 40,
+  "select": 25,
   "claim": true,
   "deploy": "pages",
   "live_check": "pages",
   "video_feed": false,
   "candidates_from": "kr",
-  "after_deploy_cmd": "python3 ops/zh1_mirror.py run {eid} --backfill 3 && git add zh1 ops/gemini-usage.jsonl && (git diff --cached --quiet || git commit -q -m 'zh1: {eid} 한국어 검수 미러') && git pull --rebase --autostash -q origin main && git push -q origin HEAD:main"
+  "after_deploy_cmd": "python3 ops/zh1_mirror.py run {eid} --backfill 3 && git add zh1 ops/gemini-usage.jsonl && (git diff --cached --quiet || git commit -q -m 'zh1: {eid} 한국어 검수 미러') && git pull --rebase --autostash -q origin main && git push -q origin HEAD:main",
+  "cand_max_age_min": 60,
+  "grok_add": {
+   "max": 4,
+   "sources": [
+    "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json",
+    "tools/sources.zh.json"
+   ]
+  },
+  "_picker_rollback": "되돌리기: picker 를 grok_file 로",
+  "cand_sources_url": "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json"
  },
  "side": {
   "cmds": [

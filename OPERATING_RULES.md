@@ -53,3 +53,16 @@
 4. 시크릿: `GEMINI_API_KEY` (배포가 Cloudflare 면 `CLOUDFLARE_*`). 원장은 D1 이므로 토큰 불필요
 5. news-hub `config.json` channels 에 추가(OIDC 허용·모음 페이지)
 6. `*-staging` 에서 판 1개 시험 → 운영
+
+## 8. 기사 고르기 통합 — 코드 기본 목록 + 그록 추가 (2026-10-30 밤, 맥스 원칙 "모든 사이트 동일")
+- 모든 채널 `edition.picker = "base_add"`. 코드가 기본 목록(후보 40건, `ops/base/<판>.json`)을 만들고, 그록은 `ops/grok-add/<판>.json` 에 최대 4건만 보탠다.
+- 그록 추가 마감 = 그 채널 발행 예약 시각(KR 07:05/12:05/18:05 · ZH 07:45/12:45/18:45 · VN 06:35/11:35/17:35). 그 뒤에 올린 파일은 그 판에 안 쓰인다.
+- 규칙은 코드(`tools/grok_add.py`)가 강제: 최대 4건, 수집처 매체 주소만(X·Google News·블로그 금지), 24시간 안, 최근 6판 중복·같은 사건 금지, 큰 사건(big_event)은 angle 이 다른 4건까지. 미리 검사: `python3 tools/grok_add.py check <판 id>`.
+- 그록은 더 이상 `ops/picks/<판>.json`(25건 고르기)을 올리지 않는다 — 올리면 그 push 가 판을 일찍 깨워 그록 추가가 빠질 수 있다.
+- 기록: `ops/last-run.json` 의 `selection.path` = `code`(코드만) / `code+grok` / `code+grok-big`, `dropped`(뺀 그록 추가분과 이유), `factcheck_drops`(사실 대조로 뺀 기사).
+- 되돌리기: 채널 `site/<lang>.json` 의 `edition.picker` 를 KR·ZH `grok_file`, VN `cmd` 로(설정 한 줄).
+
+## 9. 발행 전 사실 대조 (factcheck, 2026-10-30)
+- 판 저장 직전에 기사마다 원문(제목·본문·메모)과 대조: 금액이 원문 숫자와 정확히 10^k 배 다르면(단위 오류), 태국 채널은 원문에 없는 주 이름이 나오면 → 재번역 1회 → 그래도 틀리면 그 기사만 빼고 발행.
+- 원문 본문을 못 가져온 기사는 제목 금액만 보고 지명은 안 본다(근거 없이 빼지 않기). 원문에 없는 '새 금액'은 계산·환산일 수 있어 빼지 않는다.
+- 끄기(비상): 채널 `site/<lang>.json` 에 `"factcheck": {"places": false}`(지명만 끔). 금액 대조는 끄는 설정을 두지 않았다.

@@ -109,14 +109,32 @@ def recent_urls(n=6):
     return urls
 
 
-def load(eid, base, conf=None, now=None, path=None):
+def _big_today(eid):
+    """오늘 다른 판에서 큰 사건 특집을 쓴 횟수(data/<날짜>-am|md|pm.json 의 big_event 기사)."""
+    n = 0
+    for s in ("am", "md", "pm"):
+        e = "%s-%s" % (eid[:10], s)
+        if e == eid:
+            continue
+        try:
+            d = json.loads((ROOT / "data" / (e + ".json")).read_text(encoding="utf-8"))
+            n += any(x.get("big_event") for x in d.get("stories") or [])
+        except Exception:
+            pass
+    return n
+
+
+def load(eid, base, conf=None, now=None, path=None, cand=None):
     """그록 추가 파일을 검사해 결과 dict:
-      adds[] (기본 목록 앞에 넣을 picks 항목, must_keep=True), boost_urls[], dropped[{url, why}], big_event(key|""), found(bool), file
-    base = 기본 목록 picks [{url,title,…}]."""
+      adds[] (기본 목록 앞에 넣을 picks 항목, must_keep=True), boost_urls[], promote[](후보 목록에만 있던 boost 기사), dropped[{url, why}],
+      big_event(key|""), found(bool), file
+    base = 기본 목록 picks [{url,title,…}]. cand = 후보 목록 {url: 항목} — 그록은 후보 전체(latest.md)를 보고 boost 하므로
+    기본 목록(상위 pool 건)에 없는 후보도 boost 할 수 있다 → 기본 목록 맨 앞으로 끌어올림(4건에 안 셈)."""
     conf = dict(conf or {})
     now = now or datetime.now(BKK)
     pf = pathlib.Path(path) if path else ROOT / "ops" / "grok-add" / (eid + ".json")
-    res = dict(found=False, file=str(pf.relative_to(ROOT)) if str(pf).startswith(str(ROOT)) else str(pf), adds=[], boost_urls=[], dropped=[], big_event="")
+    res = dict(found=False, file=str(pf.relative_to(ROOT)) if str(pf).startswith(str(ROOT)) else str(pf), adds=[], boost_urls=[], promote=[], dropped=[], big_event="")
+    cand = cand or {}
     if not pf.exists():
         return res
     try:
@@ -136,14 +154,25 @@ def load(eid, base, conf=None, now=None, path=None):
     big_key = re.sub(r"[^a-z0-9-]", "", str((big or {}).get("key") or "").lower())[:60] if big else ""
     if big and not big_key:
         res["dropped"].append(dict(url="", why="big_event 에 key 없음 — 큰 사건 예외 안 씀"))
+    if big_key and int(conf.get("big_per_day", 1)) <= _big_today(eid):
+        res["dropped"].append(dict(url="", why="큰 사건은 채널당 하루 %d회 — 오늘 이미 씀, 평소 규칙으로" % int(conf.get("big_per_day", 1))))
+        big_key = ""
     res["big_event"] = big_key
     angles = set()
     for b in g.get("boost") or []:
         u = str((b or {}).get("url") or "")
         if u in base_urls:
             res["boost_urls"].append(u)
+        elif u in cand and host_ok(u, doms) and u not in used and not any(p["url"] == u for p in res["promote"]):
+            c = cand[u]
+            pub = _pub(c.get("published"))
+            if pub and now - pub <= timedelta(hours=MAX_AGE_H):
+                res["promote"].append(dict(url=u, source=str(c.get("outlet") or c.get("source") or "")[:60], title=str(c.get("title") or "")[:300],
+                                           published=pub.isoformat(timespec="seconds"), memo="[그록 boost] X에서 뜨는 중", also=c.get("also") or []))
+            else:
+                res["dropped"].append(dict(url=u, why="boost 후보가 24시간 지남"))
         elif u:
-            res["dropped"].append(dict(url=u, why="boost 인데 기본 목록에 없는 주소"))
+            res["dropped"].append(dict(url=u, why="boost 인데 후보 목록에 없는 주소(Google News 중계·다른 주소?)"))
     for a in g.get("add") or []:
         a = a if isinstance(a, dict) else {"url": str(a)}
         u = str(a.get("url") or "")
@@ -191,7 +220,7 @@ def load(eid, base, conf=None, now=None, path=None):
 def merge(base_doc, res, select):
     """기본 목록 picks 문서 + 검사 결과 → 제미나이에 넘길 picks 문서. 순서: 그록 추가 → boost → 나머지 기본 목록."""
     base = list(base_doc.get("picks") or [])
-    boost = [b for u in res["boost_urls"] for b in base if b.get("url") == u]
+    boost = [b for u in res["boost_urls"] for b in base if b.get("url") == u] + list(res.get("promote") or [])
     rest = [b for b in base if b.get("url") not in set(res["boost_urls"])]
     picks = res["adds"] + boost + rest
     doc = dict(base_doc, picks=picks, picker="code", select=int(select or base_doc.get("select") or 20))

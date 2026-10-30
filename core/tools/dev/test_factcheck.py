@@ -59,6 +59,26 @@ try:
 except SystemExit:
     print("SKIP 위안 시험(사이트 설정 없음)")
 
+# ---- 판 저장 단계 연결(save_with_drop + make_checker): 틀린 기사만 빠지고 나머지는 발행
+try:
+    import gemini_edition as ge
+    import newslib as nl
+    saved = {}
+    _orig = nl.write_edition
+    nl.write_edition = lambda d, **k: saved.setdefault("n", len(d["stories"]))
+    items = [dict(url="https://a/%d" % i, title="ข่าว %d" % i, memo="", text="ข้อความ " * 80) for i in range(5)]
+    items[2]["title"] = "ดึงลงทุน 2.5 หมื่น ล."
+    stories = [dict(id="s%d" % i, url="https://a/%d" % i, title_th=items[i]["title"], topic="poleco", region="", headline="뉴스 %d" % i,
+                    summary=["내용"]) for i in range(5)]
+    stories[2]["headline"] = "투자 2.5조 바트 유치"
+    data = dict(stories=stories, briefing=[], highlights=["s0"])
+    okk = ge.save_with_drop(data, retranslate_fn=lambda d, sid, defect_note="": False, extra_check=__import__("factcheck").make_checker(items, ge.SITE))
+    ok(okk and saved.get("n") == 4 and [s["id"] for s in data["stories"]] == ["s0", "s1", "s3", "s4"], "저장 단계: 단위 오류 기사 1건만 격리, 4건 발행")
+    ok(ge.FACT_DROPS and ge.FACT_DROPS[0]["id"] == "s2", "격리 기록(factcheck_drops)")
+    nl.write_edition = _orig
+except SystemExit:
+    print("SKIP 저장 단계 시험(사이트 설정 없음)")
+
 # ---- 비라틴 매체명이 e/ 페이지를 깨지 않음(source_label)
 try:
     import newslib

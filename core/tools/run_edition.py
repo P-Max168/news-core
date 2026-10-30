@@ -173,6 +173,8 @@ def waiting_picks_id(now):
 
 def decide_edition(a, now):
     if a.edition:
+        if (ROOT / "data" / (a.edition + ".json")).exists():   # 발행된 판은 절대 다시 만들지 않음(덮어쓰기 금지) — 배포 확인만
+            return None, "이미 있음: %s — 지정해도 다시 만들지 않음|REDEPLOY:%s" % (a.edition, a.edition)
         return a.edition, ""
     if os.environ.get("GITHUB_EVENT_NAME") == "push":
         pid = pushed_picks_id()
@@ -213,10 +215,19 @@ def ensure_fresh_candidates(now=None):
         age = 1e9
     if age <= int(E["cand_max_age_min"]):
         log("후보 목록 %.0f분 전 수집 — 그대로 씀" % age); return age
-    if not ((ROOT / "tools" / "collect.py").exists() and (ROOT / "tools" / "sources.json").exists()):
+    srcf = ROOT / "tools" / "sources.json"
+    if not srcf.exists() and E.get("cand_sources_url"):   # ZH: 한국판 수집처 목록을 받아 같은 수집기로
+        try:
+            srcf = ROOT / "drafts" / "sources.json"
+            with urllib.request.urlopen(urllib.request.Request(E["cand_sources_url"], headers={"User-Agent": "news-core run_edition"}), timeout=20) as r:
+                srcf.write_bytes(r.read())
+        except Exception as ex:
+            log("수집처 목록 못 받음(%s)" % str(ex)[:60]); srcf = ROOT / "tools" / "sources.json"
+    if not ((ROOT / "tools" / "collect.py").exists() and srcf.exists()):
         log("후보 목록 %.0f분 묵음 — 이 채널엔 수집기·수집처 목록이 없어 그대로 씀" % age); return age
     log("후보 목록 %.0f분 묵음 — 지금 다시 수집" % age)
-    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--out", str(ROOT / "drafts" / "candidates")])
+    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--sources", str(srcf),
+            "--out", str(ROOT / "drafts" / "candidates")])
     if r.returncode:
         log("다시 수집 실패(exit %d) — 묵은 목록으로 계속" % r.returncode)
     return age
@@ -247,7 +258,15 @@ def make_base_add(eid):
         base_doc = json.loads(bf.read_text(encoding="utf-8"))
     bf.write_text(json.dumps(dict(base_doc, picks=[{k: v for k, v in p.items() if k != "text"} for p in base_doc.get("picks") or []]),
                              ensure_ascii=False, indent=1) + "\n", encoding="utf-8")   # 기록(본문 빼고 — 저작권)
-    res = grok_add.load(eid, base_doc.get("picks") or [], E.get("grok_add") or {})
+    cand = {}
+    try:   # 후보 목록 url → 항목(그록 boost 가 기본 목록 밖 후보를 가리킬 때 끌어올림)
+        cj = json.loads((ROOT / "drafts" / "candidates" / "latest.json").read_text(encoding="utf-8"))
+        for tv in (cj.get("topics") or {}).values():
+            for x in (tv.get("items") if isinstance(tv, dict) else tv) or []:
+                cand.setdefault(x.get("url"), x)
+    except Exception:
+        pass
+    res = grok_add.load(eid, base_doc.get("picks") or [], E.get("grok_add") or {}, cand=cand)
     doc = grok_add.merge(base_doc, res, target)
     SEL.update(path=grok_add.path_label(res), base=len(base_doc.get("picks") or []), adds=len(res["adds"]), boost=doc["grok_add"]["boost"],
                big_event=res["big_event"], grok_file=res["found"], dropped=res["dropped"][:10], select=target)
@@ -361,7 +380,9 @@ def main():
 
     picks = make_picks(eid)
     if not picks:
-        write_fail(eid, "no_picks"); push_fail_record(eid) if not a.dry else None; claim("release", eid)
+        write_fail(eid, "no_picks")
+        if not a.dry:
+            push_fail_record(eid); claim("release", eid)
         log("후보 없음(picks 실패) — 비상 발행이 이어받음"); return 3
 
     cmd = [sys.executable, "tools/gemini_edition.py", eid, picks]

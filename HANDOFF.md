@@ -1,3 +1,53 @@
+# ▶ 최신 추가 — 2026-10-30 밤 · 오역 차단(factcheck) + 기사 고르기 통합(base_add) · Claude (이 방: 대화 세션)
+
+브랜치 `claude/edition-quality-p1`(news-core) — **아래 기존 인수인계 브랜치 `claude/news-core-handoff-review-ob9uw9` 위에 쌓음**. 병합 순서: 기존 PR(news-core #1, KR #10, ZH #4, VN #2) → 이 PR → 채널 설정 PR.
+
+## A. 왜
+- 10-30 저녁판 오역: ZH pe1 "2.5万亿泰铢"(원문 2.5 หมื่น ล. = 250억), KR ea2 "2.5만 바트", ZH cn2 "春武里"(원문 춤폰). 기존 검사는 숫자·지명이 원문과 같은지 안 봤음.
+- 최근 45판 제목 대조에서 **VN 제목 5건이 tỷ(10억)를 억으로 옮긴 10배 오류**(10-28 md st1·st2, 10-29 md ea2, 10-29 pm ea4, 10-30 md so3) — 이미 발행됨, 고치지 않음(맥스 결정 필요).
+- 맥스 원칙: 모든 사이트 동일 — 코드가 기본 목록, 그록은 놓친 중요 기사 최대 4건(X 흐름 + 수집처 매체로 확인), 큰 사건이면 4건 모두 같은 사건 가능.
+
+## B. 바꾼 것
+| 파일 | 무엇 |
+|---|---|
+| `core/tools/factcheck.py`(새) | 원문 숫자(태국어 ล./หมื่น ล./แสน ล., 베트남어 tỷ/triệu(천 단위 점·소수 쉼표), 영어 million(하이픈), 한국어 억/만) ↔ 번역 금액(바트·泰铢·동). 같은 값 없고 정확히 10^k 배면 실패. 태국 77개 주 표(한·중 표기 + 별칭: 파타야→촌부리, 후아힌→쁘라추압 등)로 원문에 없는 주 이름 실패. 본문 없으면 제목 금액만, 지명 안 봄. `python3 tools/factcheck.py demo` |
+| `core/tools/gemini_edition.py` | `save_with_drop(extra_check=)` 로 factcheck 연결(재번역 1회 → 격리), 실행 기록 `factcheck_drops`. 지시문·재번역 지시문에 단위·지명 규칙. 모델이 쓴 위안 환산 제거(`MODEL_CNY_RE`, 10-30 vi1 "（约4.95亿元）/约4.95亿元"). picks 의 must_keep·picked_by·big_event·angle 전달, 기사에 `picked_by`·`big_event` 표시, 큰 사건 기사 주요 기사 맨 앞 |
+| `core/tools/grok_add.py`(새) | `ops/grok-add/<판>.json` 검사·합치기(GROK_SPEC_grok-add.md 3절 규칙 전부 코드로), boost 가 기본 목록 밖 후보면 끌어올림, 큰 사건 하루 1회(`big_per_day`). `check` CLI |
+| `core/tools/run_edition.py` | picker `base_add`: 기본 목록(code_picks pool 40 → `ops/base/<판>.json` 또는 `base_cmd`) + 그록 추가 → `drafts/merged/<판>.json`(커밋 안 됨). 후보가 `cand_max_age_min`(60)분보다 묵으면 그 자리에서 다시 수집(ZH 는 `cand_sources_url`). `last-run.json` 에 `selection`·`factcheck_drops`. `--edition` 으로 발행된 판 지정 시 다시 만들지 않음. dry 실행에서 담당 해제 안 부름 |
+| `core/workflows/edition.yml` | feedparser·googlenewsdecoder 설치(다시 수집용) |
+| `core.json` | factcheck.py·grok_add.py·dev/test_factcheck.py·dev/test_grok_add.py 추가(71개) |
+| `rollout/*.edition.json` | 3채널 base_add 설정(되돌리기 = picker grok_file / VN cmd) |
+| `OPERATING_RULES.md` 8·9절, `GROK_SPEC_grok-add.md`(새) | 운영 규칙·그록 규격 |
+
+## C. 검증(확인됨)
+- `tools/dev/test_factcheck.py`(10-30 오역 3건 + 우본/우돈 + VN tỷ 재현·오탐 방지·저장 단계 격리·위안 이중 제거·비라틴 매체명) — KR·ZH·VN 클론 모두 통과
+- `tools/dev/test_grok_add.py`(최대 4·수집처·X/Google News·24h·같은 사건·boost·큰 사건 angle·합치기 순서) — 3채널 통과
+- 기존 `test_gemini_edition_quarantine`·`test_money_round`·`test_gemini_spend` 3채널 통과, `sync.py` 검사(py_compile·site_build·test_pwa·HTML diff 0) 3채널 통과
+- dry-run: KR·ZH·VN × am/md/pm × (그록 파일 있음/없음) — 판 id·고르기 경로·뺀 이유 정상, 하한 전 skip, 발행된 판 지정 시 "이미 있음"
+- 최근 45판 제목 대조 오탐: KR 0/664, ZH 0/201(잡힌 1건 = 진짜 pe1), VN 0/280(잡힌 5건 = 진짜 tỷ 오류)
+
+## D. 확인 못 한 것 (UNVERIFIED)
+- 실제 제미나이 호출로 만든 판(이 세션은 제미나이 키·외부 기사 사이트 접속 없음 — 원문 본문 가져오기 0건). 첫 운영 판에서 `factcheck_drops` 를 볼 것
+- 본문이 있을 때 지명 대조 오탐률(제목만으로는 지명 검사를 안 하므로 측정 못 함)
+- VN `base_cmd`(vn_picks) 실제 수집 — 시험은 기존 판 데이터로 만든 대역으로 함
+- 다시 수집(collect.py)이 Actions 에서 걸리는 시간(로컬은 네트워크 차단)
+
+## E. 시도했다가 안 된 것
+| 시도 | 결과 | 대신 |
+|---|---|---|
+| 단위 없는 작은 숫자도 10^k 비교에 씀 | '20년'·'5명'·'700개'와 비교해 오탐(KR 7건) | 단위 있는 값 + 10,000 이상만 10^k 비교, 작은 숫자는 '같은 값' 대조에만 |
+| 본문 없을 때도 요약 금액까지 대조 | 본문에만 있는 금액을 몰라 오탐 | 본문 없으면 번역 제목 금액만 |
+| 영어 "37-million-baht" | 하이픈 때문에 37 로 읽혀 오탐 | 정규식에 하이픈 허용 |
+| 그록 boost 를 기본 목록(40건) 안에서만 인정 | 그록은 후보 전체를 보고 boost → 대부분 빠짐 | 후보 목록에 있으면 끌어올림 |
+| grok-add push 로 판을 깨우기 | 그림자 운영(grok_file) 중 그록 파일 push 가 코드 대비 판을 일찍 만들 위험 | 깨우지 않음 — 발행 예약 시각이 마감 |
+
+## F. Claude 가 스스로 정한 것(맥스가 고르지 않음)
+- 판 기사 수 select 25(그록 추가 포함), 기본 목록 pool 40, 후보 신선도 60분, 단위 오류 허용 오차 5%, 큰 사건 하루 1회를 코드로 강제
+- 기본 목록 별도 예약(발행 30분 전) 생략 — 그록은 후보 목록(latest.md)과 비교해 일하면 충분, 예약을 늘리면 GitHub 예약 누락 위험만 커짐
+- 큰 사건 '특집 묶음' 화면은 이번에 안 만듦 — 대신 큰 사건 기사를 주요 기사(highlights) 맨 앞에. 화면은 디자인 원칙(tnews 그대로) 확인 뒤
+
+---
+
 # HANDOFF — 뉴스 채널 공통 구조(news-core) 인수인계 · 2026-10-30 11:50 BKK
 
 이 파일만 읽고 바로 이어서 일할 수 있게 쓴 것이다. 확인한 사실만 적었고, 확인 못 한 것은 **UNVERIFIED** 로 표시했다. 비밀값은 없다.
