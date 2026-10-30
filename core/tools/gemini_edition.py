@@ -766,7 +766,7 @@ def main():
         print("제미나이 호출 %d/%d · 기사 %d건 · 지시문 %d자" % (ci + 1, len(chunks), len(ch), len(prompt)))
         outs.append(call_gemini(prompt, key, a.model, meta=dict(meta, chunk="%d/%d" % (ci + 1, len(chunks)))))
     out = merge_model_outs(outs) if len(outs) > 1 else outs[0]
-    if a.select and len(outs) > 1:
+    if a.select:   # (2026-10-30) 한 번 호출이어도 모델이 상한보다 많이 keep 할 수 있음 → 항상 재적용(설계서 2-1 ②)
         out = cap_kept(out, items, a.select)
     data = assemble(a.eid, items, out)
     if fx:
@@ -796,13 +796,16 @@ def main():
 
 
 if __name__ == "__main__":
+    _T0 = time.time()
     try:
         raise SystemExit(main())
     except SystemExit as ex:
         # call_gemini 등에서 이미 edition-fail 을 쓴 뒤 raise 한 경우 그대로
         # main() 이 int 로 끝난 비정상은 위에서 처리. 예외 메시지만 있는 SystemExit 보완
         code = ex.code
-        if code not in (0, None) and not (ROOT / "ops" / "edition-fail.json").exists():
+        _f = ROOT / "ops" / "edition-fail.json"
+        # 이번 실행에서 쓴 기록이 없으면(지난 판 기록이 남아 있어도) 새로 씀 — 비상 발행이 엉뚱한 판 실패를 읽지 않게(2026-10-30)
+        if code not in (0, None) and not (_f.exists() and _f.stat().st_mtime >= _T0 - 1):
             _write_edition_fail(error="system_exit:%s" % (code if not isinstance(code, int) else code))
         raise
     except Exception as ex:

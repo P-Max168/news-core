@@ -21,7 +21,7 @@ site/<lang>.json "edition" 키(없으면 기본값 = 한국판 지금 동작):
   video_feed: true(md 판 뒤 ops/video 생성)   candidates_from: "own" | "kr"(한국판 candidates 브랜치)
   after_deploy_cmd(배포·대조 뒤, 예: zh1 미러), metrics_line: true(VN 형식 ops/metrics.jsonl 한 줄), stale_slots(edition_stale 목표 시각)
 """
-import argparse, json, os, pathlib, re, subprocess, sys, time, urllib.request
+import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -36,6 +36,8 @@ E = dict(picker="grok_file", pool=30, select=0, claim=True, publisher="grok", de
          video_feed=False, candidates_from="own", pre_cmd="", post_cmd="", picker_cmd="", deploy_cmd="", live_timeout=900, metrics_line=False, after_deploy_cmd="")
 E.update(C.get("edition") or {})
 SLOT_ORDER = [s for s in C.get("slots") or ["am", "md", "pm"] if s in ("am", "md", "pm")]
+T0 = time.time()   # 이번 실행 시작 — 이보다 오래된 edition-fail.json 은 지난 실행의 기록
+PICKS_EARLY_MIN = 15   # 그록 picks 가 하한보다 이만큼 일찍 와 있어도 그 판으로 만든다
 
 
 def log(*a):
@@ -74,22 +76,38 @@ def slot_for(now):
 
 def write_fail(eid, error, **extra):
     OPS.mkdir(exist_ok=True)
-    if FAIL.exists():   # gemini_edition 등 하위가 먼저 썼으면 그대로
+    # gemini_edition 등 하위가 '이번 실행에서' 먼저 썼으면 그대로. 지난 판·지난 실행의 기록(커밋돼 남은 것)은 덮어씀 —
+    # 안 그러면 비상 발행이 엉뚱한 판의 실패를 읽는다(2026-10-30).
+    if FAIL.exists() and FAIL.stat().st_mtime >= T0 - 1:
         return
     rec = dict(at=datetime.now(BKK).isoformat(timespec="seconds"), edition=eid, error=error, **extra)
     FAIL.write_text(json.dumps(rec, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
 
 def push_fail_record(eid):
-    """실패 기록(edition-fail.json·usage)만 커밋·push. 원장 파일은 절대 올리지 않음. 실패해도 조용히."""
+    """실패 기록(edition-fail.json·usage)만 origin/main 위에 커밋·push. 원장 파일은 절대 올리지 않음. 실패해도 조용히.
+    (2026-10-30) 작업 폴더의 HEAD 를 push 하면 저장 단계에서 못 올린 판 커밋까지 같이 나가(Pages 채널은 push = 배포)
+    '실패로 기록된 판이 라이브에 뜨는' 일이 생긴다 → 임시 worktree(origin/main)에서 기록 파일만 올린다."""
+    files = [f for f in ("ops/edition-fail.json", "ops/gemini-usage.jsonl") if (ROOT / f).exists()]
+    if not files:
+        return False
+    wt = pathlib.Path(tempfile.mkdtemp(prefix="edition-fail-"))
     try:
-        sh("git add ops/edition-fail.json ops/gemini-usage.jsonl 2>/dev/null; git diff --cached --quiet || git commit -q -m 'ops: edition-fail %s'" % eid)
         for i in range(1, 5):
-            if sh("git pull --rebase --autostash -q origin main && git push -q origin HEAD:main").returncode == 0:
+            sh("git worktree remove --force '%s' 2>/dev/null; rm -rf '%s'; git fetch -q origin main && git worktree add -q --detach '%s' origin/main" % (wt, wt, wt))
+            if not (wt / "ops").exists():
+                (wt / "ops").mkdir(parents=True, exist_ok=True)
+            for f in files:
+                shutil.copy2(ROOT / f, wt / f)
+            r = subprocess.run("git add %s && (git diff --cached --quiet || git commit -q -m 'ops: edition-fail %s') && git push -q origin HEAD:main"
+                               % (" ".join(files), eid), cwd=wt, shell=True, capture_output=True, text=True)
+            if r.returncode == 0:
                 return True
-            sh("git rebase --abort 2>/dev/null; true"); time.sleep(i * 5)
+            log("실패 기록 push 재시도(%d): %s" % (i, (r.stderr or "")[-200:])); time.sleep(i * 5)
     except Exception as ex:
         log("실패 기록 push 못 함:", ex)
+    finally:
+        sh("git worktree remove --force '%s' 2>/dev/null; rm -rf '%s'; git worktree prune" % (wt, wt))
     return False
 
 
@@ -105,11 +123,43 @@ def fetch_candidates():
     sh("git fetch -q %s +candidates:refs/remotes/cand/candidates && git show cand/candidates:candidates/latest.json > drafts/candidates/latest.json" % src)
 
 
+PICKS_RE = re.compile(r"^ops/picks/(\d{4}-\d{2}-\d{2}-(?:am|md|pm))\.json$")
+
+
 def pushed_picks_id():
-    """push 이벤트(그록 picks 커밋): 마지막 커밋에서 바뀐 ops/picks/<id>.json 의 id. 하한보다 2~3분 일찍 올려도 그 판을 만들게(예전 yml 과 같음)."""
-    r = sh("git diff --name-only HEAD~1 HEAD -- 'ops/picks/*.json'", capture=True)
-    ids = [re.sub(r"^ops/picks/(.*)\.json$", r"\1", l.strip()) for l in r.stdout.splitlines() if l.strip()]
-    return ids[-1] if ids else ""
+    """push 이벤트(그록 picks 커밋): 그 push 에서 추가·수정된 ops/picks/<id>.json 의 id. 하한보다 2~3분 일찍 올려도 그 판을 만들게.
+    (2026-10-30) 예전엔 HEAD~1..HEAD 를 봤는데, checkout 이 ref_name(최신 main)이라 picks push 뒤 다른 커밋(시세·한국뉴스)이
+    끼면 picks 가 안 보여 판을 놓쳤다 → 이벤트 페이로드(push 에 든 모든 커밋의 파일 목록)를 먼저 본다."""
+    ids = []
+    try:
+        ev = json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+        for c in ev.get("commits") or []:
+            for f in (c.get("added") or []) + (c.get("modified") or []):
+                m = PICKS_RE.match(f)
+                if m:
+                    ids.append(m.group(1))
+    except Exception:
+        pass
+    if not ids:
+        sha = os.environ.get("GITHUB_SHA") or "HEAD"
+        r = sh("git diff --name-only %s~1 %s -- 'ops/picks/*.json'" % (sha, sha), capture=True)
+        ids = [m.group(1) for m in (PICKS_RE.match(l.strip()) for l in r.stdout.splitlines()) if m]
+    return sorted(ids)[-1] if ids else ""
+
+
+def waiting_picks_id(now):
+    """그록 picks 가 저장소에 있는데 아직 판이 없는 오늘 판(하한 PICKS_EARLY_MIN 분 전부터). picks push 실행이 대기열에서
+    밀려 취소되거나(concurrency) 늦어도, 다음 예약·감시·수동 실행이 그 picks 로 판을 만들게(2026-10-30)."""
+    if E["picker"] != "grok_file":
+        return ""
+    fl, day, hm = floors(), now.strftime("%Y-%m-%d"), now.hour * 60 + now.minute
+    best = ""
+    for s in SLOT_ORDER:
+        h, m = fl.get(s, (0, 0))
+        eid = "%s-%s" % (day, s)
+        if hm >= h * 60 + m - PICKS_EARLY_MIN and (OPS / "picks" / (eid + ".json")).exists() and not (ROOT / "data" / (eid + ".json")).exists():
+            best = eid
+    return best
 
 
 def decide_edition(a, now):
@@ -122,9 +172,13 @@ def decide_edition(a, now):
                 return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(다시 만들려면 Run workflow 로 판 지정)" % pid
             return pid, ""
     s = a.slot or slot_for(now)
-    if not s:
+    eid = "%s-%s" % (now.strftime("%Y-%m-%d"), s) if s else ""
+    wp = "" if a.slot else waiting_picks_id(now)
+    if wp and wp > eid:   # 하한 조금 전이거나 지난 판이 이미 있어도, 판 없는 그록 picks 가 있으면 그 판
+        log("판 없는 그록 picks 발견:", wp)
+        eid = wp
+    if not eid:
         return None, "하한 전(지금 %s BKK) — 판 고르기 건너뜀" % now.strftime("%H:%M")
-    eid = "%s-%s" % (now.strftime("%Y-%m-%d"), s)
     if (ROOT / "data" / (eid + ".json")).exists():
         return None, "이미 있음: %s — 할 일 없음|REDEPLOY:%s" % (eid, eid)
     if E["claim"] and not a.dry:
@@ -158,7 +212,8 @@ def redeploy_if_stale(eid, env):
     url = C["site_url"].rstrip("/") + "/data/%s.json?_=%d" % (eid, int(time.time()))
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (run_edition redeploy check)", "Cache-Control": "no-cache"}), timeout=20) as r:
-            if len(json.load(r).get("stories") or []) == local_n:
+            d = json.load(r)
+            if len(d.get("stories") or []) == local_n and d.get("generated") == local_generated(eid):
                 log("라이브도 %s(%d건) — 재배포 불필요" % (eid, local_n)); print("skip=1"); return 0
     except Exception as ex:
         log("라이브에 %s 없음(%s) — 저장된 판을 다시 배포" % (eid, str(ex)[:60]))
@@ -169,8 +224,13 @@ def redeploy_if_stale(eid, env):
     log("재배포 완료:", eid); return 0
 
 
+def local_generated(eid):
+    return json.loads((ROOT / "data" / (eid + ".json")).read_text(encoding="utf-8")).get("generated")
+
+
 def live_check(eid, local_n):
-    """라이브 data/index.json 의 latest 가 이 판이고 기사 수가 같은지(설계서 2-1 ③). 못 붙는 환경이면 건너뜀."""
+    """라이브 data/<판>.json 이 저장본과 같은지 — 기사 수와 generated(설계서 2-1 ③: 같은 판 id 라도 다른 실행이 만든 것이면 다름)."""
+    gen = local_generated(eid)
     url = C["site_url"].rstrip("/") + "/data/%s.json?_=%d" % (eid, int(time.time()))
     deadline = time.time() + int(E["live_timeout"])
     while True:
@@ -178,9 +238,9 @@ def live_check(eid, local_n):
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (run_edition live check)", "Cache-Control": "no-cache"}), timeout=20) as r:
                 d = json.load(r)
             n = len(d.get("stories") or [])
-            if n == local_n:
-                log("라이브 대조 OK: %s %d건" % (eid, n)); return True
-            log("라이브 %d건 ≠ 저장 %d건 — 반영 대기" % (n, local_n))
+            if n == local_n and (not gen or d.get("generated") == gen):
+                log("라이브 대조 OK: %s %d건 generated %s" % (eid, n, gen)); return True
+            log("라이브 %d건·%s ≠ 저장 %d건·%s — 반영 대기" % (n, d.get("generated"), local_n, gen))
         except Exception as ex:
             log("라이브 아직:", str(ex)[:80])
         if time.time() > deadline:
@@ -214,7 +274,9 @@ def main():
         log(why); print("skip=1"); return 0
     log("판:", eid)
     if not os.environ.get("GEMINI_API_KEY") and not a.dry:
-        log("GEMINI_API_KEY 없음 — 자동 판 건너뜀(비상 발행이 메움)"); print("skip=1"); return 0
+        # (2026-10-30) 예전엔 초록 skip — 운영 규칙(초록 skip 은 하한 전·이미 있음·담당 표시뿐)과 어긋나 키가 빠져도 아무도 모름 → 실패로
+        write_fail(eid, "missing_GEMINI_API_KEY"); push_fail_record(eid)
+        log("GEMINI_API_KEY 없음 — 판 못 만듦(저장소 Secret 확인). 비상 발행이 edition-fail.json 을 보고 메움"); return 3
 
     if not a.dry and claim("claim", eid):
         log("담당 표시 HOLD — 다른 담당이 이미 맡음"); print("skip=1"); return 0
@@ -260,6 +322,9 @@ def main():
         log("--no-deploy: 저장·배포 생략"); return 0
     lc = "none" if E["deploy"] in ("cloudflare", "none") else E["live_check"]   # deploy=none: 시험 저장소(저장까지만)
     r = sh("bash tools/deploy.sh", env=dict(env, TNK_LIVE_CHECK=lc))
+    if r.returncode == 4:   # deploy.sh 담당 확인: 그사이 다른 담당(Claude 비상 take)이 이 판을 가져감 → 실패 아님, 넘겨줌
+        claim("release", eid)
+        log("다른 담당이 %s 를 가져감 — 이 실행은 배포하지 않고 끝(실패 기록 없음)" % eid); print("skip=1"); return 0
     if r.returncode:
         write_fail(eid, "deploy_sh_exit_%d" % r.returncode, stage="save"); push_fail_record(eid); claim("release", eid)
         log("저장(push) 실패 — 배포 안 함"); return 4

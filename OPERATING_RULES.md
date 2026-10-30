@@ -30,6 +30,10 @@
 - 실패 = Actions 빨간색 + `ops/edition-fail.json` 커밋(exit 3 생성 / 4 저장 / 5 배포·대조). 초록인데 판이 없는 경우는 "하한 전"·"이미 있음"·"담당 표시 있음" skip 뿐이며 로그 첫 줄에 이유가 찍힌다.
 - 같은 판은 두 번 안 만든다(picks 재push·예약 재실행 모두 skip). 일부러 다시 만들 때만 Run workflow 에 판 id 지정.
 - 그록 picks 루틴은 그대로: `ops/picks/<판id>.json` push 가 발행을 깨운다. 하한(06:40 등)보다 2~3분 일찍 올려도 그 판으로 만든다.
+- picks push 로 깬 실행이 대기열에서 밀려 취소돼도, 다음 실행(예약·감시 자가 복구·수동)이 "판 없는 오늘 picks"(하한 15분 전부터)를 찾아 그 판으로 만든다(2026-10-30).
+- 실패 기록 push 는 origin/main 위에 기록 파일만 올린다 — 저장 단계에서 못 올린 판 커밋은 절대 같이 나가지 않는다.
+- 배포 직전 담당 확인에서 다른 담당(Claude 비상 take)이 가져갔으면 실패가 아니라 넘겨줌(초록, 실패 기록 없음).
+- `GEMINI_API_KEY` 가 없으면 빨간색 + `edition-fail.json`(예전엔 초록 skip 이라 아무도 몰랐음).
 
 ## 5. 비용 원장
 - 운영 원장은 news.pmaxone.com(D1) — 운영 4저장소 `main` 실행만 `prod`, 브랜치·시험 저장소·로컬은 `test`. 상한은 prod 만 센다.
@@ -37,7 +41,9 @@
 - 시험은 반드시 `*-staging` 저장소에서(상한 30바트, 원장 분리).
 
 ## 6. 감시·비상
-- `edition-watch`(각 채널, 시각은 `site/<lang>.json watch_slots`) + 그록 상자 판+40분 점검 + Claude 비상 예약 9개 — 기존 그대로.
+- `edition-watch`(각 채널, 시각은 `site/<lang>.json watch_slots`) + 그록 상자 판+40분 점검 + Claude 비상 예약 9개.
+- **감시 자가 복구(2026-10-30)**: 오늘 판이 예정(watch_slots) + 30분 지나도 라이브에 없고, edition 실행이 대기·실행 중이거나 25분 안에 시작된 게 없고, 그 판의 `edition-fail.json` 도 없으면 감시가 `edition.yml` 을 기본 토큰으로 실행한다(판 지정 없음 = 지금 슬롯만, 지난 판은 안 만듦). 끄기: 저장소 변수 `WATCH_DISPATCH=0`. 분 조정: `edition.watch_recover_min`.
+- Claude 비상 예약은 **예약 작업 설정에 저장소가 붙어 있어야** 돈다(2026-10-30 확인: 9개 전부 저장소 없음 → 0단계에서 종료). 저장소 연결은 맥스가 Claude 앱 예약 작업 설정에서.
 - Claude 비상 발행은 `ops/edition-fail.json` 과 판 파일 유무로 판단. 성공한 판은 그 파일을 지우므로(deploy.sh), 남아 있으면 진짜 실패.
 
 ## 7. 새 채널(예: 필리핀) 추가 규약

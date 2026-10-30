@@ -34,6 +34,15 @@ try:
 except Exception as _e:   # 설정을 못 읽으면 한국판 기본값(감시는 계속)
     print("siteconf 못 읽음 — 기본값:", _e, file=sys.stderr)
 LIMIT_MIN = 90
+# 자가 복구(2026-10-30): 오늘 판이 예정 + RECOVER_MIN 분이 지나도 라이브에 없고 edition 실행도 안 돌고 있으면 edition.yml 을 깨움
+#   (같은 저장소 workflow_dispatch 는 기본 GITHUB_TOKEN 으로 됨 — 새 자격증명 없음). GitHub 예약이 빠져도 감시 한 번만 돌면 판이 나감.
+#   지난 판(어제·이미 지난 슬롯)은 만들지 않음 — run_edition 은 판 지정 없이 '지금 슬롯'만 만든다. 끄기: 저장소 변수 WATCH_DISPATCH=0
+RECOVER_MIN = 30
+WORKFLOW = "edition.yml"
+try:
+    RECOVER_MIN = int((_C.get("edition") or {}).get("watch_recover_min", RECOVER_MIN))
+except Exception:
+    pass
 LABEL = "edition-gap"
 MENTION = "@P-Max168"
 
@@ -146,6 +155,43 @@ def gap_list(latest, upto):
     return out
 
 
+def current_due(now):
+    """오늘 슬롯 중 예정 + RECOVER_MIN 이 지난 가장 최근 판 id(없으면 None)."""
+    best = None
+    for slot, h, m in SLOTS:
+        sched = dt.datetime(now.year, now.month, now.day, h, m, tzinfo=BKK)
+        if sched + dt.timedelta(minutes=RECOVER_MIN) <= now:
+            best = "%s-%s" % (now.date().isoformat(), slot)
+    return best
+
+
+def recover(now, latest, dry):
+    """오늘 판이 늦으면 edition.yml 실행(대기·실행 중이거나 25분 안에 시작된 실행이 있으면 안 함). 반환: 한 일 문자열."""
+    due = current_due(now)
+    if not due or (latest and latest >= due):
+        return ""
+    if os.environ.get("WATCH_DISPATCH", "1") == "0":
+        return "자가 복구 꺼짐(WATCH_DISPATCH=0) — %s 늦음" % due
+    try:   # 이 판이 이미 실패로 기록됐으면 다시 돌리지 않음(같은 실패 반복·유료 호출 반복 방지) — 비상 발행·사람 몫
+        f = json.loads((pathlib.Path(__file__).resolve().parent.parent / "ops" / "edition-fail.json").read_text(encoding="utf-8"))
+        if f.get("edition") == due:
+            return "자가 복구 안 함: %s 은 이미 실패 기록(ops/edition-fail.json: %s) — 비상 발행 몫" % (due, f.get("error"))
+    except Exception:
+        pass
+    st, js = gh("GET", "/repos/%s/actions/workflows/%s/runs?per_page=10" % (REPO, WORKFLOW))
+    if st != 200 or not isinstance(js, dict):
+        return "자가 복구 못 함: 실행 목록 못 읽음(%s)" % st
+    cut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=25)
+    for r in js.get("workflow_runs") or []:
+        started = dt.datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+        if r.get("status") in ("queued", "in_progress", "waiting", "requested", "pending") or started >= cut:
+            return "자가 복구 안 함: edition 실행 %s(%s, %s) 있음 — %s 기다림" % (r.get("id"), r.get("status"), r.get("event"), due)
+    if dry:
+        return "[dry-run] %s 늦음 → %s 실행 예정" % (due, WORKFLOW)
+    st, js = gh("POST", "/repos/%s/actions/workflows/%s/dispatches" % (REPO, WORKFLOW), {"ref": "main"})
+    return ("자가 복구: %s 늦음 → %s 실행 요청(%s)" % (due, WORKFLOW, st)) if st == 204 else ("‼️ 자가 복구 실패: dispatch %s %s" % (st, js))
+
+
 def main(argv):
     dry = "--dry-run" in argv
     def opt(name):
@@ -169,6 +215,10 @@ def main(argv):
     if err:
         print("‼️ 라이브를 못 읽음: %s" % err); return 2
     print("라이브 latest: %s · generated: %s" % (latest, gen))
+    if not opt("--latest") and not opt("--now"):   # 흉내 값으로는 실제 실행을 깨우지 않음
+        msg = recover(now, latest, dry)
+        if msg:
+            print(msg)
     issues, ierr = open_gap_issues()
     if latest >= ed:
         print("정상: 라이브 latest 가 기대 판 이상 — 조용히 끝(이슈 안 엶)")
