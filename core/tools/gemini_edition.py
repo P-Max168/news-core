@@ -385,16 +385,44 @@ def to_bkk(iso):
         return None
 
 
+def _fx_stale(rate_time, now=None):
+    """시세 파일의 환율이 '오늘 갱신 전' 값인지(2026-10-30). open.er-api 는 매일 00:02 UTC(07:02 BKK)에 갱신 — 아침 시세 수집이 그보다
+    먼저 돌면 어제 환율이 판에 들어간다. 갱신 시각은 site/<lang>.json currency.fx_update_bkk(기본 "07:02"), 그 뒤 3분부터 stale 로 본다."""
+    try:
+        hh, mm = (SITE.get("currency", {}).get("fx_update_bkk") or "07:02").split(":")
+        now = now or datetime.now(BKK)
+        upd = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        if now < upd + timedelta(minutes=3):
+            return False   # 아직 오늘 갱신 전(또는 직후) — 어제 값이 최신
+        rt = datetime.fromisoformat(str(rate_time))
+        if rt.tzinfo is None:
+            rt = rt.replace(tzinfo=BKK)
+        return rt < upd
+    except Exception:
+        return False
+
+
 def fx_now():
     cur = SITE.get("currency", {})
     pair = cur.get("money_pair") or cur.get("pair", "THB_KRW")   # money_pair: 시세 칩과 기사 금액 환산 쌍이 다를 때(태국어판 = 칩 THB_KRW · 기사 KRW_THB)
+    out = None
     try:
         t = json.loads((ROOT / "data" / "ticker.json").read_text(encoding="utf-8"))
         a, b = pair.split("_")
         rate = t["fx"][pair] if pair in t["fx"] else 1.0 / t["fx"]["%s_%s" % (b, a)]   # 거꾸로만 있으면 역수(KRW_THB = 1/THB_KRW)
-        return {pair: round(rate, 6), "source": t["fx"].get("source", ""), "note": "%s %s (data/ticker.json)" % (pair, t["fx"].get("rate_time", ""))}
+        out = {pair: round(rate, 6), "source": t["fx"].get("source", ""), "note": "%s %s (data/ticker.json)" % (pair, t["fx"].get("rate_time", ""))}
+        if not _fx_stale(t["fx"].get("rate_time")):
+            return out
+        print("시세 파일 환율이 오늘 갱신 전 값(%s) — 지금 환율을 받아 씀" % t["fx"].get("rate_time"))
     except Exception:
-        return None
+        pass
+    try:   # 파일이 없거나 어제 값이면 지금 바로(실패하면 파일 값 그대로 — 지어내지 않음)
+        import fetch_ticker
+        live = fetch_ticker.fx_live(pair)
+        return {pair: round(live["rate"], 6), "source": live["source"], "note": "%s %s (live)" % (pair, live["rate_time"])}
+    except Exception as ex:
+        print("환율 즉시 조회 실패(%s) — 시세 파일 값 사용" % str(ex)[:80], file=sys.stderr)
+        return out
 
 
 def assemble(eid, items, out):
@@ -411,10 +439,11 @@ def assemble(eid, items, out):
         sec = [x for x in (s.get("secondary") or []) if x in newslib.TOPICS and x != s["topic"]][:3]
         st = dict(id=sid, topic=s["topic"], secondary=sec, region=str(s.get("region") or "")[:40],
                   headline=str(s.get("headline") or "").strip(), summary=[str(x).strip() for x in (s.get("summary") or []) if str(x).strip()][:4],
-                  context=str(s.get("context") or "").strip(), source=it["source"], url=it["url"], title_th=it["title"],
+                  context=str(s.get("context") or "").strip(), source=newslib.source_label(it["source"], urlparse(it["url"]).netloc), url=it["url"], title_th=it["title"],
                   published=it["published"], related=[], tags=[str(x).lstrip("#").strip() for x in (s.get("tags") or []) if str(x).strip()][:6],
                   impact=[x for x in (s.get("impact") or []) if x in newslib.IMPACTS][:3], for_me=str(s.get("for_me") or "")[:160],
-                  also=[a for a in (it.get("also") or []) if isinstance(a, dict) and str(a.get("url", "")).startswith("http") and a.get("source")
+                  also=[dict(a, source=newslib.source_label(a["source"], urlparse(a["url"]).netloc)) for a in (it.get("also") or [])   # 매체 이름의 태국 글자 제거(2026-10-30)
+                        if isinstance(a, dict) and str(a.get("url", "")).startswith("http") and a.get("source")
                         and a["url"] != it["url"] and "news.google.com" not in a["url"]][:8],
                   issue=None, quick_replies=[str(q).strip()[:40] for q in (s.get("quick_replies") or []) if 2 <= len(str(q).strip())][:4])
         if not st["context"]:

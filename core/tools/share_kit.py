@@ -52,6 +52,7 @@ e = html.escape
 # ── 언어판(R-zh-8, 2026-10-18 Grok): 시스템 공유·편집 기준 분리. 한국판은 TX 기본값 = 지금 글자 그대로 ──
 sys.path.insert(0, str(ROOT / "tools"))
 import siteconf  # noqa: E402
+import newslib  # noqa: E402  (매체 이름 표시 source_label, 2026-10-30)
 _S = siteconf.load()
 LANG = _S["lang"]
 TX = {"brand": "태국 뉴스 한눈에", "brand_sub": "파타야에서 읽는 오늘의 태국", "html_lang": "ko", "og_locale": "ko_KR",
@@ -346,7 +347,7 @@ li{padding:calc(var(--k)*18px) 0}
 </div></body></html>""") % (
         css, m, d, e(wd), e(edn), badge_html(main, 0, hl, tp),
         e(a), ("<p>%s</p>" % e(b)) if b else ("<p>%s</p>" % e((main.get("summary") or [""])[0])),
-        e(main.get("source", "")), e(fmt_time(main.get("published"))),
+        e(newslib.source_label(main.get("source", ""))), e(fmt_time(main.get("published"))),
         BRIEF_BADGE.get(data.get("edition"), TX["brief_badge"]), len(rest), "".join(brief_li(s, tp) for s in rest),
         icon("link"), SHORT, UPDATE_LINE)
 
@@ -521,6 +522,7 @@ def main():
     ap.add_argument("--no-main-link", action="store_true")
     ap.add_argument("--no-publish", action="store_true")
     ap.add_argument("--out", default="")
+    ap.add_argument("--pages-only", action="store_true", help="e/<판>/index.html·sitemap·feed 만(카드 PNG·브라우저 없이 — 빠진 판 미리보기 다시 만들기)")
     a = ap.parse_args()
     if a.out:
         a.no_publish = True
@@ -554,7 +556,12 @@ def main():
     ch.write_text(card_html(data, meta, chosen, tp), encoding="utf-8")
     oh.write_text(og_html(data, meta, chosen, tp), encoding="utf-8")
     card_png, og_png = share / (eid + ".png"), share / (eid + "-og.png")
-    asyncio.run(render([(ch, card_png, 1080, 1350), (oh, og_png, 1200, 630)]))
+    rendered = False
+    if not a.pages_only:
+        try:   # (2026-10-30) 브라우저(playwright)가 없거나 실패해도 판 미리보기 e/ 페이지·sitemap 은 만든다 — 그래야 /e/<판>/ 이 404 가 안 남
+            asyncio.run(render([(ch, card_png, 1080, 1350), (oh, og_png, 1200, 630)])); rendered = True
+        except Exception as ex:
+            print("경고: 카드 PNG 렌더 실패(%s) — e/ 페이지·sitemap 은 계속" % str(ex)[:120], file=sys.stderr)
 
     msg = message(data, meta, chosen, tp, ed_url, not a.no_main_link)
     (share / (eid + ".txt")).write_text(msg, encoding="utf-8")
@@ -564,11 +571,12 @@ def main():
     if not a.no_publish:
         og = ROOT / "og"
         og.mkdir(exist_ok=True)
-        shutil.copyfile(og_png, og / (eid + ".png"))
-        print("saved og/%s.png" % eid)
-        if eid == idx["latest"]:
-            shutil.copyfile(og_png, og / "latest.png")
-            print("saved og/latest.png")
+        if rendered:
+            shutil.copyfile(og_png, og / (eid + ".png"))
+            print("saved og/%s.png" % eid)
+            if eid == idx["latest"]:
+                shutil.copyfile(og_png, og / "latest.png")
+                print("saved og/latest.png")
         ep = ROOT / "e" / eid
         ep.mkdir(parents=True, exist_ok=True)
         (ep / "index.html").write_text(page, encoding="utf-8")
