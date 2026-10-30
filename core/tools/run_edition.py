@@ -20,6 +20,14 @@ site/<lang>.json "edition" 키(없으면 기본값 = 한국판 지금 동작):
   deploy: "pages" | "cloudflare" | "none"(시험: 저장까지만)   deploy_cmd(cloudflare 일 때 push 뒤 실행)   live_check: "pages" | "curl" | "none"
   video_feed: true(md 판 뒤 ops/video 생성)   candidates_from: "own" | "kr"(한국판 candidates 브랜치)
   after_deploy_cmd(배포·대조 뒤, 예: zh1 미러), metrics_line: true(VN 형식 ops/metrics.jsonl 한 줄), stale_slots(edition_stale 목표 시각)
+
+  picker "base_add" (2026-10-30 P1, 설계서 '기사 고르기 통합 v1' — 모든 채널 같은 2단계):
+    ① 기본 목록 = 코드(code_picks, 후보가 cand_max_age_min 분보다 묵었으면 그 자리에서 다시 수집) 또는 base_cmd(VN vn_picks)
+       → ops/base/<id>.json (본문 없이 기록)
+    ② 그록 추가 ops/grok-add/<id>.json 을 tools/grok_add.py 가 검사(최대 4건·수집처 매체·24시간·같은 사건·큰 사건 angle·boost)
+    ③ 그록 추가(must_keep) → boost → 기본 목록 순으로 합쳐 제미나이에 넘김(select = 판 기사 수, 그록 추가분 포함)
+    ④ ops/last-run.json selection = {path: code|code+grok|code+grok-big, base, adds, boost, dropped, big_event}
+    edition.grok_add = {max: 4, sources: [수집처 목록 파일 또는 https 주소]}. 마감은 발행 예약 시각 그 자체(그 전에 올라온 파일만 씀).
 """
 import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from datetime import datetime, timedelta, timezone
@@ -33,7 +41,8 @@ OPS = ROOT / "ops"
 FAIL = OPS / "edition-fail.json"
 C = siteconf.load()
 E = dict(picker="grok_file", pool=30, select=0, claim=True, publisher="grok", deploy="pages", live_check="pages",
-         video_feed=False, candidates_from="own", pre_cmd="", post_cmd="", picker_cmd="", deploy_cmd="", live_timeout=900, metrics_line=False, after_deploy_cmd="")
+         video_feed=False, candidates_from="own", pre_cmd="", post_cmd="", picker_cmd="", deploy_cmd="", live_timeout=900, metrics_line=False, after_deploy_cmd="",
+         base_cmd="", grok_add={}, cand_max_age_min=60)
 E.update(C.get("edition") or {})
 SLOT_ORDER = [s for s in C.get("slots") or ["am", "md", "pm"] if s in ("am", "md", "pm")]
 T0 = time.time()   # 이번 실행 시작 — 이보다 오래된 edition-fail.json 은 지난 실행의 기록
@@ -189,8 +198,73 @@ def decide_edition(a, now):
     return eid, ""
 
 
+SEL = {}   # base_add 고르기 결과(last-run.json selection)
+
+
+def ensure_fresh_candidates(now=None):
+    """후보 목록이 cand_max_age_min 분보다 묵었으면 이 실행 안에서 다시 수집(2026-10-30: 10-30 점심판 후보가 09:07 수집분 그대로였음 —
+    11:17 수집 예약이 안 돎). 수집기·수집처 목록이 있는 채널(KR)만. 실패하면 묵은 목록 그대로(판은 계속)."""
+    lf = ROOT / "drafts" / "candidates" / "latest.json"
+    now = now or datetime.now(BKK)
+    try:
+        gen = datetime.fromisoformat(json.loads(lf.read_text(encoding="utf-8"))["generated"])
+        age = (now - (gen if gen.tzinfo else gen.replace(tzinfo=BKK))).total_seconds() / 60
+    except Exception:
+        age = 1e9
+    if age <= int(E["cand_max_age_min"]):
+        log("후보 목록 %.0f분 전 수집 — 그대로 씀" % age); return age
+    if not ((ROOT / "tools" / "collect.py").exists() and (ROOT / "tools" / "sources.json").exists()):
+        log("후보 목록 %.0f분 묵음 — 이 채널엔 수집기·수집처 목록이 없어 그대로 씀" % age); return age
+    log("후보 목록 %.0f분 묵음 — 지금 다시 수집" % age)
+    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--out", str(ROOT / "drafts" / "candidates")])
+    if r.returncode:
+        log("다시 수집 실패(exit %d) — 묵은 목록으로 계속" % r.returncode)
+    return age
+
+
+def make_base_add(eid):
+    """picker base_add: 기본 목록 + 그록 추가 → 합친 picks 파일 경로(drafts/merged, 커밋 안 됨). 실패면 None."""
+    import grok_add
+    target = int(E["select"] or 25)
+    bf = OPS / "base" / (eid + ".json")
+    bf.parent.mkdir(parents=True, exist_ok=True)
+    if E["base_cmd"]:   # VN: 사이트 전용 수집·본문(vn_picks) — 마지막 출력 줄 = 본문 포함 picks 파일
+        r = sh(E["base_cmd"].replace("{eid}", eid), capture=True)
+        print(r.stdout[-2000:], r.stderr[-2000:])
+        last = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        if r.returncode or not last or not os.path.exists(last[-1]):
+            return None
+        base_doc = json.loads(pathlib.Path(last[-1]).read_text(encoding="utf-8"))
+    else:
+        try:
+            fetch_candidates()
+        except Exception as ex:
+            log("후보 목록 못 받음:", ex)
+        ensure_fresh_candidates()
+        r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(E["pool"]), "--select", str(target), "--out", str(bf)])
+        if r.returncode or not bf.exists():
+            return None
+        base_doc = json.loads(bf.read_text(encoding="utf-8"))
+    bf.write_text(json.dumps(dict(base_doc, picks=[{k: v for k, v in p.items() if k != "text"} for p in base_doc.get("picks") or []]),
+                             ensure_ascii=False, indent=1) + "\n", encoding="utf-8")   # 기록(본문 빼고 — 저작권)
+    res = grok_add.load(eid, base_doc.get("picks") or [], E.get("grok_add") or {})
+    doc = grok_add.merge(base_doc, res, target)
+    SEL.update(path=grok_add.path_label(res), base=len(base_doc.get("picks") or []), adds=len(res["adds"]), boost=doc["grok_add"]["boost"],
+               big_event=res["big_event"], grok_file=res["found"], dropped=res["dropped"][:10], select=target)
+    log("고르기: %s · 기본 %d · 그록 추가 %d · boost %d · 뺀 것 %d%s" % (SEL["path"], SEL["base"], SEL["adds"], SEL["boost"], len(res["dropped"]),
+                                                               "" if res["found"] else " (그록 파일 없음 — 코드 목록만)"))
+    for d in res["dropped"]:
+        log("  그록 추가 뺌:", d.get("why"), d.get("url"))
+    mf = ROOT / "drafts" / "merged" / (eid + ".json")
+    mf.parent.mkdir(parents=True, exist_ok=True)
+    mf.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return str(mf)
+
+
 def make_picks(eid):
     """picks 파일 경로를 돌려준다. 없으면 None."""
+    if E["picker"] == "base_add":
+        return make_base_add(eid)
     pf = OPS / "picks" / (eid + ".json")
     if E["picker"] in ("grok_file", "code"):
         try:   # 후보 목록은 그록 picks 일 때도 받는다 — gemini_edition 이 picks 에 빠진 제목·매체·시각을 채우는 데 씀(옛 yml 과 같음). 실패해도 계속
@@ -291,7 +365,7 @@ def main():
         log("후보 없음(picks 실패) — 비상 발행이 이어받음"); return 3
 
     cmd = [sys.executable, "tools/gemini_edition.py", eid, picks]
-    if E["select"]:
+    if E["select"] and E["picker"] != "base_add":   # base_add 는 합친 picks 파일 안의 select(판 기사 수)를 씀
         cmd += ["--select", str(E["select"])]
     if os.environ.get("GEMINI_MODEL"):
         cmd += ["--model", os.environ["GEMINI_MODEL"]]
@@ -316,6 +390,15 @@ def main():
     # 기록은 저장(commit) 전에 써야 같은 커밋에 들어간다(news.pmaxone.com 모음 페이지가 ops/last-run.json 을 읽음)
     rec = dict(at=datetime.now(timezone.utc).isoformat(), edition=eid, published=local_n, seconds=round(time.time() - t0, 1),
                event=os.environ.get("GITHUB_EVENT_NAME", "local"), site=C["lang"], picker=E["picker"])
+    if SEL:
+        rec["selection"] = SEL
+    try:   # 사실 대조로 뺀 기사(gemini_edition 실행 기록 마지막 줄)
+        last = (OPS / "gemini-usage.jsonl").read_text(encoding="utf-8").strip().splitlines()[-1]
+        fd = json.loads(last).get("factcheck_drops")
+        if fd and json.loads(last).get("edition") == eid:
+            rec["factcheck_drops"] = fd
+    except Exception:
+        pass
     (OPS / "last-run.json").write_text(json.dumps(dict(metrics=rec), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if E.get("metrics_line"):   # VN 형식 한 줄(KR·ZH 는 deploy.sh 안 tools/metrics.py 가 씀)
         with open(OPS / "metrics.jsonl", "a", encoding="utf-8") as f:

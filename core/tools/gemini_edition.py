@@ -32,6 +32,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 import newslib  # noqa: E402
 import siteconf  # noqa: E402
+import factcheck  # noqa: E402  # 발행 전 금액 단위·지명 대조(2026-10-30)
 
 BKK = timezone(timedelta(hours=7))
 SITE = siteconf.load()
@@ -105,14 +106,18 @@ def build_prompt(eid, items, fx_line, select=0):
         "- keep=false: 원문에서 확인 안 되는 기사, 성인·선정적 내용, 같은 사건 중복이면 false 와 drop_reason.\n"
         "- summary 2~4문단. 원문 문장을 그대로 옮기지 말고 다시 쓴다. 원문에 없는 사실·숫자·인용·반응을 만들지 않는다.\n"
         "- 금액은 현지 통화로 쓰고(원문 숫자 그대로, 반올림 정수) 독자 통화 환산(원·위안)은 쓰지 마라 — 코드가 판 환율로 붙인다.\n"
+        "- 금액 단위를 원문과 똑같이: 태국어 'ล.'=ล้าน(백만), 'หมื่น ล.'=หมื่นล้าน=100억, 'แสน ล.'=1,000억, 'พัน ล.'=10억 (예: 2.5 หมื่น ล. = 250억 바트). "
+        "베트남어 tỷ=10억, triệu=100만, nghìn tỷ=1조 (예: 20 tỷ đồng = 200억 동). 옮긴 뒤 자릿수가 원문과 같은지 다시 확인한다. 코드가 원문 숫자와 대조해 틀리면 그 기사를 뺀다.\n"
+        "- 지명은 원문의 주·군 이름을 그대로 옮긴다. 비슷한 지명(춤폰↔촌부리, 우본↔우돈)으로 추측하지 않는다. 원문에 없는 주 이름을 덧붙이지 않는다(코드가 대조해 뺀다).\n"
+        "- must_keep=true 인 기사(운영자가 추가 확인한 중요 기사)는 원문에서 확인되면 반드시 keep=true. big_event 가 같은 기사들은 같은 큰 사건의 서로 다른 측면(angle)이라 '같은 사건 중복'으로 빼지 않는다.\n"
         "- briefing 4~6줄, 각 줄은 서로 다른 기사. highlights 는 가장 중요한 기사 3개(keep=true 인 것).\n"
         "- 원문 본문이 비어 있으면 memo 와 제목에 있는 사실만 쓰고, 그것도 부족하면 keep=false.\n"
         % (reader, lang_name, eid, fx_line, rules_text(), topics_text(), " / ".join(newslib.IMPACTS)))
     if select:
         head += ("- [고르기] 아래 후보 %d건 중 독자에게 뉴스 가치가 가장 높은 %d~%d건을 keep=true(좋은 기사가 그만큼 없을 때만 줄임. 사건·사고·정책·경제·비자·생활 정보·한국 관련 우선, "
                  "연성·홍보성 기사는 뒤로, 한 매체에 몰리지 않게). 나머지는 keep=false, drop_reason=\"선택 안 함\".\n" % (len(items), max(4, select - 2), select))
-    body = json.dumps([{k: v for k, v in it.items() if k in ("key", "source", "title", "published", "memo", "text")} for it in items],
-                      ensure_ascii=False)
+    body = json.dumps([{k: v for k, v in it.items() if k in ("key", "source", "title", "published", "memo", "text", "must_keep", "big_event", "angle") and v not in (None, "", False)}
+                       for it in items], ensure_ascii=False)
     return head + "\n[기사들]\n" + body
 
 
@@ -310,6 +315,9 @@ def merge_model_outs(outs):
 VND_RE = re.compile(r"(?<![\d,.])(%s)(?:\s*[~\-–]\s*(%s))?\s*동(?!네|부|안|시|북|남|서|쪽|행|료|생|기|물|작|맹|원|아)" % (newslib._AMT, newslib._AMT))   # 숫자+동 뒤 조사(이·을·의…)는 허용
 
 
+MODEL_CNY_RE = re.compile(r"(泰铢)\s*[/／、，,]\s*约?\s*合?\s*[\d,.万亿~\-–至\s]+元")
+
+
 def _fix_text(t, rate, kind):
     if not isinstance(t, str) or not rate:
         return t
@@ -341,6 +349,9 @@ def _fix_text(t, rate, kind):
             pos = m.end()
         return "".join(out) + t[pos:]
     if kind == "cny":   # 泰铢 → （约N元）
+        # 모델이 지시를 어기고 스스로 쓴 위안 환산('25亿泰铢/约4.95亿元', '25亿泰铢，约4.95亿元')은 먼저 지운다 —
+        # 안 지우면 코드 환산과 겹쳐 '25亿泰铢（约4.95亿元）/约4.95亿元' 이 됨(2026-10-30-pm vi1)
+        t = MODEL_CNY_RE.sub(lambda m: m.group(1), t)
         out, pos = [], 0
         for m in newslib.CNY_BAHT_RE.finditer(t):
             if newslib.CNY_AFTER_RE.match(t, m.end()):
@@ -446,6 +457,10 @@ def assemble(eid, items, out):
                         if isinstance(a, dict) and str(a.get("url", "")).startswith("http") and a.get("source")
                         and a["url"] != it["url"] and "news.google.com" not in a["url"]][:8],
                   issue=None, quick_replies=[str(q).strip()[:40] for q in (s.get("quick_replies") or []) if 2 <= len(str(q).strip())][:4])
+        if it.get("picked_by"):   # 그록 추가(ops/grok-add) 기사 표시 — 화면 '특집' 묶음·통계용(2026-10-30 P1)
+            st["picked_by"] = it["picked_by"]
+        if it.get("big_event"):
+            st["big_event"] = it["big_event"]
         if not st["context"]:
             st.pop("context")
         if len(st["quick_replies"]) < 3:
@@ -467,7 +482,8 @@ def assemble(eid, items, out):
             mark = s["region"] or newslib.TOPICS[s["topic"]]
             briefing.append(dict(topic=s["topic"], text=("**%s** %s" % (mark, s["headline"]))[:120], story_id=s["id"])); used.add(s["id"])
     hl = [keymap[k] for k in (out.get("highlights") or []) if k in keymap]
-    hl = list(dict.fromkeys(hl + ids))[:3]
+    big = [s["id"] for s in stories if s.get("big_event")]   # 큰 사건 특집이면 그 기사들이 주요 기사 맨 앞
+    hl = list(dict.fromkeys(big + hl + ids))[:3]
     d0 = datetime.strptime(eid[:10], "%Y-%m-%d")
     idx = json.loads((ROOT / "data" / "index.json").read_text(encoding="utf-8")) if (ROOT / "data" / "index.json").exists() else {}
     return dict(id=eid, date=eid[:10], edition=eid[11:], edition_label=newslib.EDITION_LABEL[eid[11:]],
@@ -556,9 +572,10 @@ def build_retranslate_prompt(eid, item, fx_line, defect_note=""):
         '"headline":"제목","summary":["문단1","문단2"],"context":"",'
         '"tags":["키워드",…2~6개],"impact":[],"for_me":"","quick_replies":[]}\n'
         "- summary 2~4문단. 원문에 없는 사실·숫자를 만들지 않는다.\n"
-        "- 금액은 현지 통화만(환산은 코드가 붙임).\n"
+        "- 금액은 현지 통화만(환산은 코드가 붙임). 단위는 원문과 똑같이: 태국어 ล.=ล้าน(백만), หมื่น ล.=100억, แสน ล.=1,000억 · 베트남어 tỷ=10억, triệu=100만.\n"
+        "- 지명은 원문 주·군 이름 그대로. 원문에 없는 주 이름을 쓰지 않는다.\n"
         "- topic 은 다음 중 하나: %s\n"
-        % (eid, lang_name, fx_line, forbid, (defect_note or "화면 금지 문자")[:200],
+        % (eid, lang_name, fx_line, forbid, (defect_note or "화면 금지 문자")[:400],
            " / ".join(newslib.TOPICS)))
     body = json.dumps({k: item.get(k) for k in ("key", "source", "title", "published", "memo", "text")},
                       ensure_ascii=False)
@@ -667,7 +684,10 @@ def story_id_from_assert(a, story_ids):
     return walk(a) if isinstance(a, (tuple, str)) else None
 
 
-def save_with_drop(data, min_stories=4, retranslate_fn=None):
+FACT_DROPS = []   # 사실 대조(factcheck)로 뺀 기사 [(id, 이유)] — 실행 기록·last-run 에 남김
+
+
+def save_with_drop(data, min_stories=4, retranslate_fn=None, extra_check=None):
     """검증 실패 기사는 재번역 1회 후 재검증, 그래도 안 되면 빼고 다시.
     min_stories 미만이면 포기. 기사 id 를 못 찾으면 판 전체 실패.
     retranslate_fn(data, sid, defect_note="") → True 면 필드 교체됨(다시 write)."""
@@ -676,6 +696,8 @@ def save_with_drop(data, min_stories=4, retranslate_fn=None):
     # 기사마다 재번역+격리 여유(+여분). 무한 루프 방지.
     for _ in range(max(8, len(data.get("stories") or []) * 2 + 2)):
         try:
+            if extra_check:   # 금액 단위·지명 대조(factcheck) — 실패는 다른 검증과 똑같이 재번역 1회 → 격리
+                extra_check(data)
             newslib.write_edition(data)
             if dropped:
                 print("격리 %d건 후 발행 %d건: %s" % (len(dropped), len(data["stories"]), ",".join(dropped)), flush=True)
@@ -687,7 +709,7 @@ def save_with_drop(data, min_stories=4, retranslate_fn=None):
             bad = story_id_from_assert(a, ids)
             if not bad:
                 return False
-            note = str(a)[:200]
+            note = str(a)[:400]
             if retranslate_fn and bad not in retried:
                 retried.add(bad)
                 print("재번역 시도(빼기 전): %s" % bad, flush=True)
@@ -701,6 +723,8 @@ def save_with_drop(data, min_stories=4, retranslate_fn=None):
             else:
                 print("격리(빼기): %s" % bad, flush=True)
             dropped.append(bad)
+            if "factcheck" in str(a)[:80]:
+                FACT_DROPS.append(dict(id=bad, why=note[:300]))
             data["stories"] = [s for s in data["stories"] if s["id"] != bad]
             data["briefing"] = [b for b in data["briefing"] if b.get("story_id") != bad]
             data["highlights"] = [h for h in data["highlights"] if h != bad]
@@ -757,7 +781,9 @@ def main():
         if "news.google.com" in urlparse(u).netloc:
             print("빼기(Google News 중계 주소 — 실제 기사 주소 필요): %s" % u, file=sys.stderr); continue
         items.append(dict(key="p%d" % (i + 1), url=u, source=str(p["source"])[:60], title=str(p["title"])[:300], published=pub,
-                          memo=str(p.get("memo") or "")[:600], also=p.get("also") or [], text=str(p.get("text") or "")[:6000]))
+                          memo=str(p.get("memo") or "")[:600], also=p.get("also") or [], text=str(p.get("text") or "")[:6000],
+                          must_keep=bool(p.get("must_keep")), picked_by=str(p.get("picked_by") or ""), big_event=str(p.get("big_event") or ""),
+                          angle=str(p.get("angle") or "")[:40]))
     for it in items:
         if not it["text"]:
             it["text"] = article_text(it["url"])
@@ -803,11 +829,11 @@ def main():
     fix_money(data)
     # 결함 기사: 주 모델로 1건 재번역(짧은 타임아웃) 후, 그래도 안 되면 격리
     re_fn = make_retranslate_fn(items, key, a.model, a.eid, fx_line, fx=fx)
-    ok = len(data["stories"]) >= 4 and save_with_drop(data, retranslate_fn=re_fn)
+    ok = len(data["stories"]) >= 4 and save_with_drop(data, retranslate_fn=re_fn, extra_check=factcheck.make_checker(items, SITE))
     kept = sum(1 for s in out.get("stories") or [] if s.get("keep") is not False)
     drops = [dict(key=s.get("key"), why=str(s.get("drop_reason") or "")[:40]) for s in out.get("stories") or [] if s.get("keep") is False][:30]
     rec = dict(at=datetime.now(BKK).isoformat(timespec="seconds"), edition=a.eid, model=ACTIVE_MODEL, primary_model=a.model, picks=len(items), body=got, kept_by_model=kept,
-               model_drops=drops, after_check=len(data["stories"]), chunks=len(chunks),
+               model_drops=drops, after_check=len(data["stories"]), chunks=len(chunks), factcheck_drops=FACT_DROPS,
                published=len(data["stories"]) if ok else 0, seconds=round(time.time() - t0, 1), **USAGE)
     _log_usage(rec)
     if ok:

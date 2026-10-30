@@ -1,7 +1,7 @@
 {
  "version": 1,
  "stage": 3,
- "source_of_truth": "core/tools (2026-10-29 S0 refresh, Claude): 29개 갱신 + 기존 코어에 없던 공통 12개·dev 23개 추가. 기준: thai-news-kr aff53a0 / thai-news-zh ae4f73c / vn-news-kr aa6e4f5. edition_claim·gemini_spend·video_picks=kr, newslib=zh(<1元 소수), pending=zh 가드판. 아직 코어에 안 넣은 공통: deploy.sh·edition_stale.py·gpt_lane_check.py — 사이트별 값이 코드에 박혀 있어 S2(설정화) 뒤 추가. | S2(2026-10-29): run_edition.py(공통 실행기)·deploy.sh(설정화)·edition_stale.py(설정화)·workflows 템플릿 추가, gemini_edition 묶음 상한 재적용. | 2026-10-30: side_data.py + side-data.yml(korea.yml·china.yml 대체), 매체 이름 태국 글자 제거(source_label), 환율 stale 즉시 조회, 감시 자가 복구.",
+ "source_of_truth": "core/tools (2026-10-29 S0 refresh, Claude): 29개 갱신 + 기존 코어에 없던 공통 12개·dev 23개 추가. 기준: thai-news-kr aff53a0 / thai-news-zh ae4f73c / vn-news-kr aa6e4f5. edition_claim·gemini_spend·video_picks=kr, newslib=zh(<1元 소수), pending=zh 가드판. 아직 코어에 안 넣은 공통: deploy.sh·edition_stale.py·gpt_lane_check.py — 사이트별 값이 코드에 박혀 있어 S2(설정화) 뒤 추가. | S2(2026-10-29): run_edition.py(공통 실행기)·deploy.sh(설정화)·edition_stale.py(설정화)·workflows 템플릿 추가, gemini_edition 묶음 상한 재적용. | 2026-10-30: side_data.py + side-data.yml(korea.yml·china.yml 대체), 매체 이름 태국 글자 제거(source_label), 환율 stale 즉시 조회, 감시 자가 복구. | 2026-10-30 밤(P1·오역): factcheck.py(발행 전 금액 단위·지명 대조), grok_add.py(그록 추가 검사), run_edition picker base_add(기본 목록+그록 추가·후보 신선도), 위안 이중 환산 제거.",
  "files": [
   {
    "src": "core/tools/adsafe.py",
@@ -270,6 +270,22 @@
   {
    "src": "core/tools/video_picks.py",
    "dst": "tools/video_picks.py"
+  },
+  {
+   "src": "core/tools/factcheck.py",
+   "dst": "tools/factcheck.py"
+  },
+  {
+   "src": "core/tools/grok_add.py",
+   "dst": "tools/grok_add.py"
+  },
+  {
+   "src": "core/tools/dev/test_factcheck.py",
+   "dst": "tools/dev/test_factcheck.py"
+  },
+  {
+   "src": "core/tools/dev/test_grok_add.py",
+   "dst": "tools/dev/test_grok_add.py"
   }
  ],
  "rollout_order": [

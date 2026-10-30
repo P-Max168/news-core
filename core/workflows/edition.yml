@@ -49,7 +49,7 @@ jobs:
           python-version: "3.12"
       - name: 의존성
         run: |
-          pip install --quiet requests beautifulsoup4 playwright==1.55.0
+          pip install --quiet requests beautifulsoup4 feedparser googlenewsdecoder playwright==1.55.0   # feedparser·googlenewsdecoder: base_add 가 묵은 후보를 다시 수집할 때(collect.py)
           [ -f pipeline/requirements.txt ] && pip install --quiet -r pipeline/requirements.txt || true
       - name: 공유 카드용 브라우저(실패해도 판은 나감)
         continue-on-error: true
