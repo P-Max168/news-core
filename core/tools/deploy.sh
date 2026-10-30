@@ -37,8 +37,11 @@ git checkout -q main
 # 🇰🇷 data/korea.json|js · 💱 data/ticker.json|js(헤더 시세 칩)는 GitHub Actions(.github/workflows/korea.yml)가 2시간마다 갱신·커밋하는 파일
 # → 이 스크립트는 절대 올리지 않는다. 로컬 사본(오래됐을 수 있음)은 버리고 원격 것을 받는다(pull 때 충돌·덮어쓰기 방지).
 KOREA_FILES="data/korea.json data/korea.js data/ticker.json data/ticker.js"
-# (2026-10-29 공통화) 그 파일을 따로 갱신하는 워크플로(korea.yml·china.yml)가 있는 채널만 제외. VN 처럼 판 실행 안(refresh_side.py)에서 갱신하는 채널은 같이 커밋
-if [ -f .github/workflows/korea.yml ] || [ -f .github/workflows/china.yml ]; then
+# (2026-10-30 공통화) 곁 데이터 파일 목록은 site/<lang>.json side.files(side-data.yml 이 갱신). 없으면 옛 기본값
+SIDE_FILES="$(python3 -c 'import sys;sys.path.insert(0,"tools");import siteconf;print(" ".join((siteconf.load().get("side") or {}).get("files") or []))' 2>/dev/null || true)"
+[ -z "$SIDE_FILES" ] || KOREA_FILES="$SIDE_FILES"
+# 그 파일을 따로 갱신하는 워크플로(side-data.yml, 옛 korea.yml·china.yml)가 있는 채널만 제외. 판 실행 안(pre_cmd)에서만 갱신하는 채널은 같이 커밋
+if [ -f .github/workflows/side-data.yml ] || [ -f .github/workflows/korea.yml ] || [ -f .github/workflows/china.yml ]; then
   for f in $KOREA_FILES; do
     if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then git checkout -q -- "$f"; else rm -f "$f"; fi
   done

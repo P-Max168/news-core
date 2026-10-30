@@ -1,0 +1,41 @@
+# 곁 데이터 갱신 템플릿 (news-core, 2026-10-30) — 헤더 시세 칩(환율·금·날씨)·한국 주요 뉴스·中国要闻 등 판과 무관한 파일을 2시간마다.
+# 채널마다 다른 것은 site/<lang>.json "side" 키(명령·파일·커밋 메시지)와 아래 cron 줄뿐. 흐름은 tools/side_data.py.
+# 예전 korea.yml(KR)·china.yml(ZH) 을 대체. 시각 UTC "9 */2" = 07:09·09:09… BKK — 환율 API 가 07:02 BKK 에 갱신된 뒤 첫 실행이 오늘 환율을 받게.
+name: side-data
+on:
+  schedule:
+    # CORE-PULL-KEEP: 아래 cron 줄은 사이트 고유 — core-pull 이 덮어쓰지 않음
+    - cron: "9 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "항목이 같아도 updated_at 을 새로 써서 커밋(--force)"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: side-data
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TZ: Asia/Bangkok
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 의존성(site/<lang>.json side.pip)
+        run: |
+          PKGS="$(python3 -c 'import sys,json;sys.path.insert(0,"tools");import siteconf;print(" ".join((siteconf.load().get("side") or {}).get("pip") or []))')"
+          [ -z "$PKGS" ] || pip install --quiet $PKGS
+      - name: 곁 데이터 갱신 → 바뀌었으면 커밋·push
+        env:
+          TNK_LANG: ${{ vars.TNK_LANG }}
+        run: |
+          [ -n "$TNK_LANG" ] || unset TNK_LANG
+          git config user.name "github-actions[bot]"; git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tools/side_data.py ${{ inputs.force && '--force' || '' }}
