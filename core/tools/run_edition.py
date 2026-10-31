@@ -20,6 +20,14 @@ site/<lang>.json "edition" 키(없으면 기본값 = 한국판 지금 동작):
   deploy: "pages" | "cloudflare" | "none"(시험: 저장까지만)   deploy_cmd(cloudflare 일 때 push 뒤 실행)   live_check: "pages" | "curl" | "none"
   video_feed: true(md 판 뒤 ops/video 생성)   candidates_from: "own" | "kr"(한국판 candidates 브랜치)
   after_deploy_cmd(배포·대조 뒤, 예: zh1 미러), metrics_line: true(VN 형식 ops/metrics.jsonl 한 줄), stale_slots(edition_stale 목표 시각)
+
+  picker "base_add" (2026-10-30 P1 → 2026-10-31 맥스 결정 반영: 선정은 코드가 전부, 그록은 추가 4건만, 제미나이는 고르지 않고 번역만):
+    ① 기본 목록 = 코드가 판 기사 수(select)만큼 확정(code_picks --pool select --select 0; 후보가 cand_max_age_min 분보다 묵었으면 다시 수집)
+       또는 base_cmd(VN vn_picks) → ops/base/<id>.json (본문 없이 기록)
+    ② 그록 추가 ops/grok-add/<id>.json 을 tools/grok_add.py 가 검사(최대 4건·수집처 매체·24시간·같은 사건·큰 사건 angle·boost)
+    ③ 그록 추가(must_keep) → boost → 기본 목록 순으로 합쳐 제미나이에 넘김(select 0 = 고르기 없음, 원문 확인 안 되는 기사만 keep=false)
+    ④ ops/last-run.json selection = {path: code|code+grok|code+grok-big, base, adds, boost, dropped, big_event}
+    edition.grok_add = {max: 4, sources: [그 채널 저장소 안 수집처 목록 파일]}. 수집처는 나라별 목록 1개를 각 채널이 설정으로 참조(원격 주소 안 씀).
 """
 import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from datetime import datetime, timedelta, timezone
@@ -33,7 +41,8 @@ OPS = ROOT / "ops"
 FAIL = OPS / "edition-fail.json"
 C = siteconf.load()
 E = dict(picker="grok_file", pool=30, select=0, claim=True, publisher="grok", deploy="pages", live_check="pages",
-         video_feed=False, candidates_from="own", pre_cmd="", post_cmd="", picker_cmd="", deploy_cmd="", live_timeout=900, metrics_line=False, after_deploy_cmd="")
+         video_feed=False, candidates_from="own", pre_cmd="", post_cmd="", picker_cmd="", deploy_cmd="", live_timeout=900, metrics_line=False, after_deploy_cmd="",
+         base_cmd="", grok_add={}, cand_max_age_min=60)
 E.update(C.get("edition") or {})
 SLOT_ORDER = [s for s in C.get("slots") or ["am", "md", "pm"] if s in ("am", "md", "pm")]
 T0 = time.time()   # 이번 실행 시작 — 이보다 오래된 edition-fail.json 은 지난 실행의 기록
@@ -164,12 +173,17 @@ def waiting_picks_id(now):
 
 def decide_edition(a, now):
     if a.edition:
+        if (ROOT / "data" / (a.edition + ".json")).exists():   # 발행된 판은 절대 다시 만들지 않음(덮어쓰기 금지) — 배포 확인만
+            return None, "이미 있음: %s — 지정해도 다시 만들지 않음|REDEPLOY:%s" % (a.edition, a.edition)
         return a.edition, ""
+    if os.environ.get("GITHUB_EVENT_NAME") == "push" and E["picker"] == "base_add":
+        # base_add: 판은 발행 예약 시각에 만든다. 옛 습관으로 picks 를 push 해도 판을 일찍 만들면 그록 추가가 빠짐
+        return None, "base_add 채널은 picks push 로 판을 만들지 않음(발행 예약 시각에 만듦)"
     if os.environ.get("GITHUB_EVENT_NAME") == "push":
         pid = pushed_picks_id()
         if pid:
             if (ROOT / "data" / (pid + ".json")).exists():
-                return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(다시 만들려면 Run workflow 로 판 지정)" % pid
+                return None, "이미 있음: %s — picks 다시 올려도 다시 만들지 않음(발행된 판은 덮어쓰지 않음)" % pid
             return pid, ""
     s = a.slot or slot_for(now)
     eid = "%s-%s" % (now.strftime("%Y-%m-%d"), s) if s else ""
@@ -189,8 +203,121 @@ def decide_edition(a, now):
     return eid, ""
 
 
+SEL = {}   # base_add 고르기 결과(last-run.json selection)
+
+
+def ensure_fresh_candidates(now=None):
+    """후보 목록이 cand_max_age_min 분보다 묵었으면 이 실행 안에서 다시 수집(2026-10-30: 10-30 점심판 후보가 09:07 수집분 그대로였음 —
+    11:17 수집 예약이 안 돎). 수집기·수집처 목록이 있는 채널(KR)만. 실패하면 묵은 목록 그대로(판은 계속)."""
+    lf = ROOT / "drafts" / "candidates" / "latest.json"
+    now = now or datetime.now(BKK)
+    try:
+        gen = datetime.fromisoformat(json.loads(lf.read_text(encoding="utf-8"))["generated"])
+        age = (now - (gen if gen.tzinfo else gen.replace(tzinfo=BKK))).total_seconds() / 60
+    except Exception:
+        age = 1e9
+    if age <= int(E["cand_max_age_min"]):
+        log("후보 목록 %.0f분 전 수집 — 그대로 씀" % age); return age
+    # 수집처 목록은 이 저장소 안 파일만(edition.cand_sources, 기본 tools/sources.json). 다른 채널 저장소에서 원격으로 받지 않음(2026-10-31 맥스 결정:
+    # 나라별 목록 1개를 각 채널이 설정으로 참조 — 공통화는 Codex 통합에서)
+    srcf = ROOT / (E.get("cand_sources") or "tools/sources.json")
+    if not ((ROOT / "tools" / "collect.py").exists() and srcf.exists()):
+        log("후보 목록 %.0f분 묵음 — 이 채널엔 수집기·수집처 목록이 없어 그대로 씀" % age); return age
+    log("후보 목록 %.0f분 묵음 — 지금 다시 수집" % age)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="cand-"))
+    r = sh([sys.executable, "tools/collect.py", "--hours", "14", "--timeout", "12", "--workers", "16", "--sources", str(srcf), "--out", str(tmp)])
+    # 새 목록이 충분할 때만 바꾼다 — 수집처가 한꺼번에 막히면 빈 목록이 묵은 목록을 덮어 판을 막던 위험(코덱스 리뷰)
+    def _n(p):
+        try:
+            return int(json.loads(p.read_text(encoding="utf-8")).get("candidates") or 0)
+        except Exception:
+            return 0
+    new_n, old_n = _n(tmp / "latest.json"), _n(lf)
+    if r.returncode == 0 and new_n >= max(30, old_n // 3):
+        shutil.copy2(tmp / "latest.json", lf)
+        log("다시 수집 완료: 후보 %d건(이전 %d건)" % (new_n, old_n))
+    else:
+        log("다시 수집 결과 부족(exit %d, %d건 / 이전 %d건) — 묵은 목록으로 계속" % (r.returncode, new_n, old_n))
+    shutil.rmtree(tmp, ignore_errors=True)
+    return age
+
+
+def grok_file_time(eid):
+    """ops/grok-add/<판>.json 이 저장소에 처음 올라온 커밋 시각(BKK). 얕은 checkout 이면 이틀치 이력을 더 받아 본다. 모르면 None."""
+    f = "ops/grok-add/%s.json" % eid
+    if not (ROOT / f).exists():
+        return None
+    since = (datetime.now(BKK) - timedelta(days=2)).strftime("%Y-%m-%d")
+    sh("git fetch -q --shallow-since=%s origin main 2>/dev/null || true" % since)
+    r = sh("git log --format=%%cI --diff-filter=AM -- %s" % f, capture=True)
+    times = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
+    try:
+        return datetime.fromisoformat(times[-1]).astimezone(BKK) if times else None   # 가장 처음 올린 시각(마감 전에 올리고 고친 것은 인정)
+    except Exception:
+        return None
+
+
+def make_base_add(eid):
+    """picker base_add: 기본 목록 + 그록 추가 → 합친 picks 파일 경로(drafts/merged, 커밋 안 됨). 실패면 None."""
+    import grok_add
+    target = int(E["select"] or 25)
+    bf = OPS / "base" / (eid + ".json")
+    bf.parent.mkdir(parents=True, exist_ok=True)
+    if E["base_cmd"]:   # VN: 사이트 전용 수집·본문(vn_picks) — 마지막 출력 줄 = 본문 포함 picks 파일
+        r = sh(E["base_cmd"].replace("{eid}", eid), capture=True)
+        print(r.stdout[-2000:], r.stderr[-2000:])
+        last = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        if r.returncode or not last or not os.path.exists(last[-1]):
+            return None
+        base_doc = json.loads(pathlib.Path(last[-1]).read_text(encoding="utf-8"))
+    else:
+        try:
+            fetch_candidates()
+        except Exception as ex:
+            log("후보 목록 못 받음:", ex)
+        ensure_fresh_candidates()
+        # 선정은 코드가 전부(2026-10-31): 기본 목록을 판 기사 수(target)만큼 확정하고 제미나이 고르기(select)는 0 — pool 설정은 base_add 에서 안 씀
+        r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(target), "--select", "0", "--out", str(bf)])
+        if r.returncode or not bf.exists():
+            return None
+        base_doc = json.loads(bf.read_text(encoding="utf-8"))
+    bf.write_text(json.dumps(dict(base_doc, picks=[{k: v for k, v in p.items() if k != "text"} for p in base_doc.get("picks") or []]),
+                             ensure_ascii=False, indent=1) + "\n", encoding="utf-8")   # 기록(본문 빼고 — 저작권)
+    cand = {}
+    try:   # 후보 목록 url → 항목(그록 boost 가 기본 목록 밖 후보를 가리킬 때 끌어올림)
+        cj = json.loads((ROOT / "drafts" / "candidates" / "latest.json").read_text(encoding="utf-8"))
+        for tv in (cj.get("topics") or {}).values():
+            for x in (tv.get("items") if isinstance(tv, dict) else tv) or []:
+                cand.setdefault(x.get("url"), x)
+    except Exception:
+        pass
+    conf = dict(E.get("grok_add") or {})
+    co = (conf.get("cutoff") or {}).get(eid[11:])   # {"am": [7, 5], …} = 그 채널 발행 예약 시각
+    if co:
+        conf["_cutoff"] = datetime.strptime(eid[:10], "%Y-%m-%d").replace(hour=int(co[0]), minute=int(co[1]), tzinfo=BKK)
+        conf["_submitted"] = grok_file_time(eid)
+    try:
+        res = grok_add.load(eid, base_doc.get("picks") or [], conf, cand=cand)
+    except Exception as ex:   # 선택 입력(그록 파일)이 이상해도 판은 코드 목록으로 계속
+        log("그록 추가 읽기 실패(%s) — 코드 목록만" % str(ex)[:80])
+        res = dict(found=True, adds=[], boost_urls=[], promote=[], dropped=[dict(url="", why="읽기 실패: %s" % str(ex)[:80])], big_event="")
+    doc = grok_add.merge(base_doc, res, 0)   # select 0 = 제미나이는 고르지 않고 번역만(그록 추가 최대 4건은 기본 목록 위에 더함)
+    SEL.update(path=grok_add.path_label(res), base=len(base_doc.get("picks") or []), adds=len(res["adds"]), boost=doc["grok_add"]["boost"],
+               big_event=res["big_event"], grok_file=res["found"], dropped=res["dropped"][:10], select=target)
+    log("고르기: %s · 기본 %d · 그록 추가 %d · boost %d · 뺀 것 %d%s" % (SEL["path"], SEL["base"], SEL["adds"], SEL["boost"], len(res["dropped"]),
+                                                               "" if res["found"] else " (그록 파일 없음 — 코드 목록만)"))
+    for d in res["dropped"]:
+        log("  그록 추가 뺌:", d.get("why"), d.get("url"))
+    mf = ROOT / "drafts" / "merged" / (eid + ".json")
+    mf.parent.mkdir(parents=True, exist_ok=True)
+    mf.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return str(mf)
+
+
 def make_picks(eid):
     """picks 파일 경로를 돌려준다. 없으면 None."""
+    if E["picker"] == "base_add":
+        return make_base_add(eid)
     pf = OPS / "picks" / (eid + ".json")
     if E["picker"] in ("grok_file", "code"):
         try:   # 후보 목록은 그록 picks 일 때도 받는다 — gemini_edition 이 picks 에 빠진 제목·매체·시각을 채우는 데 씀(옛 yml 과 같음). 실패해도 계속
@@ -285,13 +412,18 @@ def main():
     if not a.dry and claim("claim", eid):
         log("담당 표시 HOLD — 다른 담당이 이미 맡음"); print("skip=1"); return 0
 
-    picks = make_picks(eid)
+    try:
+        picks = make_picks(eid)
+    except Exception as ex:   # 고르기 단계 예외도 정상 실패 경로로(실패 기록·담당 해제) — 담당 표시가 남아 대비 실행이 막히지 않게
+        log("고르기 예외:", type(ex).__name__, str(ex)[:200]); picks = None
     if not picks:
-        write_fail(eid, "no_picks"); push_fail_record(eid) if not a.dry else None; claim("release", eid)
+        write_fail(eid, "no_picks")
+        if not a.dry:
+            push_fail_record(eid); claim("release", eid)
         log("후보 없음(picks 실패) — 비상 발행이 이어받음"); return 3
 
     cmd = [sys.executable, "tools/gemini_edition.py", eid, picks]
-    if E["select"]:
+    if E["select"] and E["picker"] != "base_add":   # base_add 는 코드가 이미 판 기사 수만큼 골랐으므로 제미나이 고르기(--select) 없음
         cmd += ["--select", str(E["select"])]
     if os.environ.get("GEMINI_MODEL"):
         cmd += ["--model", os.environ["GEMINI_MODEL"]]
@@ -316,6 +448,15 @@ def main():
     # 기록은 저장(commit) 전에 써야 같은 커밋에 들어간다(news.pmaxone.com 모음 페이지가 ops/last-run.json 을 읽음)
     rec = dict(at=datetime.now(timezone.utc).isoformat(), edition=eid, published=local_n, seconds=round(time.time() - t0, 1),
                event=os.environ.get("GITHUB_EVENT_NAME", "local"), site=C["lang"], picker=E["picker"])
+    if SEL:
+        rec["selection"] = SEL
+    try:   # 사실 대조로 뺀 기사(gemini_edition 실행 기록 마지막 줄)
+        last = (OPS / "gemini-usage.jsonl").read_text(encoding="utf-8").strip().splitlines()[-1]
+        fd = json.loads(last).get("factcheck_drops")
+        if fd and json.loads(last).get("edition") == eid:
+            rec["factcheck_drops"] = fd
+    except Exception:
+        pass
     (OPS / "last-run.json").write_text(json.dumps(dict(metrics=rec), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if E.get("metrics_line"):   # VN 형식 한 줄(KR·ZH 는 deploy.sh 안 tools/metrics.py 가 씀)
         with open(OPS / "metrics.jsonl", "a", encoding="utf-8") as f:

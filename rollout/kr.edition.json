@@ -1,13 +1,22 @@
 {
  "edition": {
-  "picker": "grok_file",
-  "pool": 30,
-  "select": 0,
+  "picker": "base_add",
+  "pool": 25,
+  "select": 25,
   "claim": true,
   "deploy": "pages",
   "live_check": "pages",
   "video_feed": true,
-  "candidates_from": "own"
+  "candidates_from": "own",
+  "cand_max_age_min": 60,
+  "grok_add": {
+   "max": 4,
+   "sources": [
+    "tools/sources.json"
+   ]
+  },
+  "_picker_rollback": "되돌리기: picker 를 grok_file 로",
+  "_base_add_doc": "2026-10-31 맥스 결정: 선정은 코드가 전부(기본 목록 = select 건), 그록은 ops/grok-add 최대 4건 추가만, 제미나이 고르기 없음(select 0 으로 넘김). 그록 추가 마감(grok_add.cutoff)은 옛 판 시각 기준이라 뺌 — 새 판 시각표(아침 KR 06:30·VN 06:35·ZH 06:40 / 점심 11:30·11:35·11:40 / 저녁 17:30·17:35·17:40) 확정 뒤 다시 넣음."
  },
  "side": {
   "cmds": [
