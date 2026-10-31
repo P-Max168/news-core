@@ -687,7 +687,7 @@ def story_id_from_assert(a, story_ids):
 FACT_DROPS = []   # 사실 대조(factcheck)로 뺀 기사 [(id, 이유)] — 실행 기록·last-run 에 남김
 
 
-def save_with_drop(data, min_stories=4, retranslate_fn=None, extra_check=None):
+def save_with_drop(data, min_stories=1, retranslate_fn=None, extra_check=None):
     """검증 실패 기사는 재번역 1회 후 재검증, 그래도 안 되면 빼고 다시.
     min_stories 미만이면 포기. 기사 id 를 못 찾으면 판 전체 실패.
     retranslate_fn(data, sid, defect_note="") → True 면 필드 교체됨(다시 write)."""
@@ -754,6 +754,8 @@ def main():
     if isinstance(pk, dict) and pk.get("picker") == "code":   # tools/code_picks.py 가 만든 후보 → 제미나이가 그중 최대 select 건 고름(2026-10-25 구조 통일)
         a.select = a.select or int(pk.get("select") or 20)
         os.environ.setdefault("PICKER", "코드(자동)")
+    if isinstance(pk, dict) and pk.get("picker") == "base_add":   # 코드가 전부 고른 목록(+그록 추가) — 제미나이 고르기 없음(select 0), 표시만(2026-10-31)
+        os.environ.setdefault("PICKER", "코드(자동)")
         if os.environ.get("PICKER") == "그록":
             os.environ["PICKER"] = "코드(자동)"
     cand = {}
@@ -789,9 +791,9 @@ def main():
             it["text"] = article_text(it["url"])
     got = sum(1 for it in items if it["text"])
     print("고른 기사 %d건 · 본문 확보 %d건" % (len(items), got))
-    if len(items) < 4:
-        _write_edition_fail(a.eid, "articles_lt_4", picks=len(items), body=got)
-        print("기사 4건 미만 — 판 안 만듦"); return 3
+    if len(items) < 1:   # 2026-10-31 맥스: 최소 기사 수 없음 — 번역된 만큼 발행(후보 0건만 실패)
+        _write_edition_fail(a.eid, "articles_lt_1", picks=len(items), body=got)
+        print("기사 0건 — 판 안 만듦"); return 3
     fx = fx_now()
     cur = SITE.get("currency", {})
     _mp = cur.get("money_pair") or cur.get("pair", "THB_KRW")
@@ -829,7 +831,7 @@ def main():
     fix_money(data)
     # 결함 기사: 주 모델로 1건 재번역(짧은 타임아웃) 후, 그래도 안 되면 격리
     re_fn = make_retranslate_fn(items, key, a.model, a.eid, fx_line, fx=fx)
-    ok = len(data["stories"]) >= 4 and save_with_drop(data, retranslate_fn=re_fn, extra_check=factcheck.make_checker(items, SITE))
+    ok = len(data["stories"]) >= 1 and save_with_drop(data, retranslate_fn=re_fn, extra_check=factcheck.make_checker(items, SITE))   # 최소 기사 수 없음(2026-10-31)
     kept = sum(1 for s in out.get("stories") or [] if s.get("keep") is not False)
     drops = [dict(key=s.get("key"), why=str(s.get("drop_reason") or "")[:40]) for s in out.get("stories") or [] if s.get("keep") is False][:30]
     rec = dict(at=datetime.now(BKK).isoformat(timespec="seconds"), edition=a.eid, model=ACTIVE_MODEL, primary_model=a.model, picks=len(items), body=got, kept_by_model=kept,
@@ -844,7 +846,7 @@ def main():
         except Exception:
             pass
     else:
-        _write_edition_fail(a.eid, "stories_lt_4_or_validate_fail",
+        _write_edition_fail(a.eid, "stories_lt_1_or_validate_fail",
                             after_check=len(data["stories"]), published=0, picks=len(items), model=a.model)
     print(json.dumps(rec, ensure_ascii=False))
     return 0 if ok else 3

@@ -1,3 +1,8 @@
+# ▶ 2026-10-31 19:xx BKK 정리(Claude, code 방) — 이 브랜치는 **참고용 · 병합 금지** (Codex 통합 반영 뒤 '흡수 완료'로 닫음)
+맥스 결정(2026-10-31)과 어긋나는 부분을 뺐다(커밋 "맥스 결정 반영 — 제거"): ① 제미나이가 후보를 다시 고르는 부분(select 25) → 코드가 판 기사 수만큼 확정, 제미나이는 번역만(select 0) ② 최소 기사 수 4 → 없음(0건만 실패)
+③ 옛 그록 추가 마감 시각(`grok_add.cutoff` 07:05/07:45/06:35…) → 뺌(새 판 시각표: 아침 KR 06:30·VN 06:35·ZH 06:40, 점심 11:30/11:35/11:40, 저녁 17:30/17:35/17:40) ④ ZH 가 KR 수집처 목록을 원격(raw.githubusercontent)으로 받는 부분(`cand_sources_url`·grok_add https) → 뺌.
+남긴 것: factcheck + 시험, 위안 이중 환산 제거, ops/base 기록(본문 없음), last-run selection·factcheck_drops, 묵은 후보 다시 수집, grok_add 최대 4건(코드 강제), feedparser 설치, ops/base 스테이징, VN base_cmd. 아래 "최신 추가" 절의 '제미나이 25건 고르기' 설명은 옛 것.
+
 # ▶ 최신 추가 — 2026-10-30 밤 · 오역 차단(factcheck) + 기사 고르기 통합(base_add) · Claude (이 방: 대화 세션)
 
 브랜치 `claude/edition-quality-p1`(news-core) — **아래 기존 인수인계 브랜치 `claude/news-core-handoff-review-ob9uw9` 위에 쌓음**. 병합 순서: 기존 PR(news-core #1, KR #10, ZH #4, VN #2) → 이 PR → 채널 설정 PR.

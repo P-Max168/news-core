@@ -85,9 +85,9 @@ ok(not r["adds"] and "edition" in r["dropped"][0]["why"], "다른 판 id 파일�
 
 base_doc = dict(edition="2026-10-31-pm", picker="code", select=20, picks=BASE)
 r = run(dict(edition="2026-10-31-pm", add=[add("https://www.khaosod.co.th/n1", "ไฟไหม้โรงงานระยอง")], boost=[{"url": BASE[1]["url"]}]))
-doc = g.merge(base_doc, r, 25)
+doc = g.merge(base_doc, r, 0)
 ok([p["url"] for p in doc["picks"]] == ["https://www.khaosod.co.th/n1", BASE[1]["url"], BASE[0]["url"]], "합치기 순서: 추가 → boost → 기본")
-ok(doc["select"] == 25 and doc["picker"] == "code" and doc["grok_add"]["adds"] == 1, "합친 문서 select·기록")
+ok(doc["select"] == 0 and doc["picker"] == "base_add" and doc["grok_add"]["adds"] == 1, "합친 문서 select 0(제미나이 고르기 없음)·기록")
 
 # ---- 코덱스 리뷰 반영(2026-10-30)
 src2 = tmp / "site.json"

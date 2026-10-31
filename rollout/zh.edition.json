@@ -1,7 +1,7 @@
 {
  "edition": {
   "picker": "base_add",
-  "pool": 40,
+  "pool": 25,
   "select": 25,
   "claim": true,
   "deploy": "pages",
@@ -13,26 +13,12 @@
   "grok_add": {
    "max": 4,
    "sources": [
-    "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json",
     "tools/sources.zh.json"
-   ],
-   "cutoff": {
-    "am": [
-     7,
-     45
-    ],
-    "md": [
-     12,
-     45
-    ],
-    "pm": [
-     18,
-     45
-    ]
-   }
+   ]
   },
   "_picker_rollback": "되돌리기: picker 를 grok_file 로",
-  "cand_sources_url": "https://raw.githubusercontent.com/P-Max168/thai-news-kr/main/tools/sources.json"
+  "_sources_doc": "태국 수집처 목록은 나라별 1개(KR tools/sources.json 과 같은 것)를 코어에 두고 설정으로 참조하기로 함 — 원격(raw.githubusercontent) 참조는 쓰지 않음(2026-10-31). 공통 목록 파일은 Codex 통합에서.",
+  "_base_add_doc": "2026-10-31 맥스 결정: 선정은 코드가 전부(기본 목록 = select 건), 그록은 ops/grok-add 최대 4건 추가만, 제미나이 고르기 없음(select 0 으로 넘김). 그록 추가 마감(grok_add.cutoff)은 옛 판 시각 기준이라 뺌 — 새 판 시각표(아침 KR 06:30·VN 06:35·ZH 06:40 / 점심 11:30·11:35·11:40 / 저녁 17:30·17:35·17:40) 확정 뒤 다시 넣음."
  },
  "side": {
   "cmds": [

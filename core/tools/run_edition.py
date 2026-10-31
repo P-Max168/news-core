@@ -21,13 +21,13 @@ site/<lang>.json "edition" 키(없으면 기본값 = 한국판 지금 동작):
   video_feed: true(md 판 뒤 ops/video 생성)   candidates_from: "own" | "kr"(한국판 candidates 브랜치)
   after_deploy_cmd(배포·대조 뒤, 예: zh1 미러), metrics_line: true(VN 형식 ops/metrics.jsonl 한 줄), stale_slots(edition_stale 목표 시각)
 
-  picker "base_add" (2026-10-30 P1, 설계서 '기사 고르기 통합 v1' — 모든 채널 같은 2단계):
-    ① 기본 목록 = 코드(code_picks, 후보가 cand_max_age_min 분보다 묵었으면 그 자리에서 다시 수집) 또는 base_cmd(VN vn_picks)
-       → ops/base/<id>.json (본문 없이 기록)
+  picker "base_add" (2026-10-30 P1 → 2026-10-31 맥스 결정 반영: 선정은 코드가 전부, 그록은 추가 4건만, 제미나이는 고르지 않고 번역만):
+    ① 기본 목록 = 코드가 판 기사 수(select)만큼 확정(code_picks --pool select --select 0; 후보가 cand_max_age_min 분보다 묵었으면 다시 수집)
+       또는 base_cmd(VN vn_picks) → ops/base/<id>.json (본문 없이 기록)
     ② 그록 추가 ops/grok-add/<id>.json 을 tools/grok_add.py 가 검사(최대 4건·수집처 매체·24시간·같은 사건·큰 사건 angle·boost)
-    ③ 그록 추가(must_keep) → boost → 기본 목록 순으로 합쳐 제미나이에 넘김(select = 판 기사 수, 그록 추가분 포함)
+    ③ 그록 추가(must_keep) → boost → 기본 목록 순으로 합쳐 제미나이에 넘김(select 0 = 고르기 없음, 원문 확인 안 되는 기사만 keep=false)
     ④ ops/last-run.json selection = {path: code|code+grok|code+grok-big, base, adds, boost, dropped, big_event}
-    edition.grok_add = {max: 4, sources: [수집처 목록 파일 또는 https 주소]}. 마감은 발행 예약 시각 그 자체(그 전에 올라온 파일만 씀).
+    edition.grok_add = {max: 4, sources: [그 채널 저장소 안 수집처 목록 파일]}. 수집처는 나라별 목록 1개를 각 채널이 설정으로 참조(원격 주소 안 씀).
 """
 import argparse, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time, urllib.request
 from datetime import datetime, timedelta, timezone
@@ -218,14 +218,9 @@ def ensure_fresh_candidates(now=None):
         age = 1e9
     if age <= int(E["cand_max_age_min"]):
         log("후보 목록 %.0f분 전 수집 — 그대로 씀" % age); return age
-    srcf = ROOT / "tools" / "sources.json"
-    if not srcf.exists() and E.get("cand_sources_url"):   # ZH: 한국판 수집처 목록을 받아 같은 수집기로
-        try:
-            srcf = ROOT / "drafts" / "sources.json"
-            with urllib.request.urlopen(urllib.request.Request(E["cand_sources_url"], headers={"User-Agent": "news-core run_edition"}), timeout=20) as r:
-                srcf.write_bytes(r.read())
-        except Exception as ex:
-            log("수집처 목록 못 받음(%s)" % str(ex)[:60]); srcf = ROOT / "tools" / "sources.json"
+    # 수집처 목록은 이 저장소 안 파일만(edition.cand_sources, 기본 tools/sources.json). 다른 채널 저장소에서 원격으로 받지 않음(2026-10-31 맥스 결정:
+    # 나라별 목록 1개를 각 채널이 설정으로 참조 — 공통화는 Codex 통합에서)
+    srcf = ROOT / (E.get("cand_sources") or "tools/sources.json")
     if not ((ROOT / "tools" / "collect.py").exists() and srcf.exists()):
         log("후보 목록 %.0f분 묵음 — 이 채널엔 수집기·수집처 목록이 없어 그대로 씀" % age); return age
     log("후보 목록 %.0f분 묵음 — 지금 다시 수집" % age)
@@ -281,7 +276,8 @@ def make_base_add(eid):
         except Exception as ex:
             log("후보 목록 못 받음:", ex)
         ensure_fresh_candidates()
-        r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(E["pool"]), "--select", str(target), "--out", str(bf)])
+        # 선정은 코드가 전부(2026-10-31): 기본 목록을 판 기사 수(target)만큼 확정하고 제미나이 고르기(select)는 0 — pool 설정은 base_add 에서 안 씀
+        r = sh([sys.executable, "tools/code_picks.py", eid, "--pool", str(target), "--select", "0", "--out", str(bf)])
         if r.returncode or not bf.exists():
             return None
         base_doc = json.loads(bf.read_text(encoding="utf-8"))
@@ -305,7 +301,7 @@ def make_base_add(eid):
     except Exception as ex:   # 선택 입력(그록 파일)이 이상해도 판은 코드 목록으로 계속
         log("그록 추가 읽기 실패(%s) — 코드 목록만" % str(ex)[:80])
         res = dict(found=True, adds=[], boost_urls=[], promote=[], dropped=[dict(url="", why="읽기 실패: %s" % str(ex)[:80])], big_event="")
-    doc = grok_add.merge(base_doc, res, target)
+    doc = grok_add.merge(base_doc, res, 0)   # select 0 = 제미나이는 고르지 않고 번역만(그록 추가 최대 4건은 기본 목록 위에 더함)
     SEL.update(path=grok_add.path_label(res), base=len(base_doc.get("picks") or []), adds=len(res["adds"]), boost=doc["grok_add"]["boost"],
                big_event=res["big_event"], grok_file=res["found"], dropped=res["dropped"][:10], select=target)
     log("고르기: %s · 기본 %d · 그록 추가 %d · boost %d · 뺀 것 %d%s" % (SEL["path"], SEL["base"], SEL["adds"], SEL["boost"], len(res["dropped"]),
@@ -427,7 +423,7 @@ def main():
         log("후보 없음(picks 실패) — 비상 발행이 이어받음"); return 3
 
     cmd = [sys.executable, "tools/gemini_edition.py", eid, picks]
-    if E["select"] and E["picker"] != "base_add":   # base_add 는 합친 picks 파일 안의 select(판 기사 수)를 씀
+    if E["select"] and E["picker"] != "base_add":   # base_add 는 코드가 이미 판 기사 수만큼 골랐으므로 제미나이 고르기(--select) 없음
         cmd += ["--select", str(E["select"])]
     if os.environ.get("GEMINI_MODEL"):
         cmd += ["--model", os.environ["GEMINI_MODEL"]]

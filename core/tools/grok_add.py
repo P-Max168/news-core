@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """그록 추가 기사(ops/grok-add/<판 id>.json) 읽기·검사 (2026-10-30 Claude, 설계서 '기사 고르기 통합 v1' 3절).
 
-모든 채널 공통 흐름: 코드가 기본 목록(후보 pool 건)을 만들고, 그록은 코드가 놓친 중요 기사를 최대 4건 보탠다.
+모든 채널 공통 흐름: 코드가 기본 목록(판 기사 수만큼)을 확정하고, 그록은 코드가 놓친 중요 기사를 최대 4건 보탠다. 제미나이는 고르지 않고 번역만.
 그록을 믿는 게 아니라 이 코드가 규칙을 강제한다:
   1. 최대 4건(넘으면 뒤에서부터 뺌)
   2. 기사 주소가 그 채널 수집처 목록(site json edition.grok_add.sources)의 매체여야 함 — X·블로그·유튜브·Google News 중계 주소 금지
@@ -14,7 +14,7 @@
     python3 tools/grok_add.py check <판 id>          # 그록이 올린 파일을 지금 규칙으로 검사(무엇이 빠질지·이유) — 그록·사람용
     python3 tools/grok_add.py check <판 id> --file x.json
 """
-import argparse, difflib, json, pathlib, re, sys, urllib.request
+import argparse, difflib, json, pathlib, re, sys
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -57,15 +57,13 @@ def _publishable(x):
 
 def source_domains(paths):
     """수집처 목록 파일들 → 허용 도메인 집합. 파일 안의 모든 http 주소와 'site:도메인'(Google News 검색 소스)을 모은다.
-    경로가 https:// 로 시작하면 받아 온다(ZH 처럼 한국판 수집처를 같이 쓰는 채널)."""
+    이 저장소 안 파일만(2026-10-31: 다른 채널 저장소에서 원격으로 받지 않음 — 나라별 목록 1개를 각 채널이 설정으로 참조)."""
     doms = set()
     for p in paths or []:
         try:
-            if str(p).startswith("https://"):
-                with urllib.request.urlopen(urllib.request.Request(p, headers={"User-Agent": "news-core grok_add"}), timeout=20) as r:
-                    j = json.loads(r.read().decode("utf-8"))
-            else:
-                j = json.loads((ROOT / p).read_text(encoding="utf-8"))
+            if str(p).startswith("http"):
+                raise ValueError("원격 주소는 쓰지 않음 — 저장소 안 파일 경로만")
+            j = json.loads((ROOT / p).read_text(encoding="utf-8"))
         except Exception as ex:
             print("grok_add: 수집처 목록 못 읽음 %s (%s)" % (p, str(ex)[:60]), file=sys.stderr)
             continue
@@ -251,7 +249,8 @@ def merge(base_doc, res, select):
     for p in res["adds"] + boost + rest:   # 같은 주소 두 번 넘기지 않기
         if p.get("url") not in seen:
             seen.add(p.get("url")); picks.append(p)
-    doc = dict(base_doc, picks=picks, picker="code", select=int(select or base_doc.get("select") or 20))
+    # select 0 = 제미나이 고르기 없음(2026-10-31 맥스: 선정은 코드가 전부, 그록은 추가 4건만). picker 표시 base_add 로 gemini_edition 의 'code→select 20' 기본값을 피함
+    doc = dict(base_doc, picks=picks, picker="base_add", select=int(select or 0))
     doc["grok_add"] = dict(adds=len(res["adds"]), boost=len(boost), dropped=res["dropped"], big_event=res["big_event"], found=res["found"])
     return doc
 
